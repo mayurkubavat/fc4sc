@@ -34,6 +34,7 @@
 #ifndef FC4SC_BASE_HPP
 #define FC4SC_BASE_HPP
 
+#include <cstdint>
 #include <map>
 #include <iostream>
 #include <string>
