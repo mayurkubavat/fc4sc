@@ -396,10 +396,14 @@ public:
 
     auto write_bin = [&](const std::vector<size_t>& indices, uint64_t count)
     {
+      // The name is made of the bin indices, as in <0,1>. Readers of UCIS
+      // files tell the bins of a cross apart by their names, and add up
+      // the counts of bins with the same name when files are merged.
       stream << "<crossBin \n";
-      stream << "name=\""
-             << ""
-             << "\"  \n";
+      stream << "name=\"&lt;";
+      for (size_t i = 0; i < indices.size(); i++)
+        stream << (i == 0 ? "" : ",") << indices[i];
+      stream << "&gt;\"  \n";
       stream << "key=\"" << get_unique_key() << "\" \n";
       //Cannot specify type attribute b/c URG bug
       //stream << "type=\""

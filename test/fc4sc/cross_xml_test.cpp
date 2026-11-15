@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -231,6 +232,42 @@ TEST(cross_xml, print_missing) {
   hits = save_cross_bins("cross_xml_print_missing.xml", cntxt);
   ASSERT_EQ(hits.size(), 6u);
   EXPECT_DOUBLE_EQ(cg.cross1.get_inst_coverage(), 100.0 * 2 / hits.size());
+
+  fc4sc::global::delete_context(cntxt);
+}
+
+// Every cross bin has a name of its own, which is made of its indices.
+// Tools which read UCIS files identify the bins of a cross by their names.
+TEST(cross_xml, bin_names) {
+  auto cntxt = fc4sc::global::create_new_context();
+  cross_xml_test cg("cg", __FILE__, __LINE__, cntxt);
+  cg.cross1.option().cross_num_print_missing = 6;
+  sample_some(cg);
+
+  xml_printer::coverage_save("cross_xml_bin_names.xml", cntxt);
+  const std::string xml = read_file("cross_xml_bin_names.xml");
+
+  std::set<std::string> names;
+  size_t pos = 0;
+  while (true) {
+    const std::string element = next_element(xml, "<crossBin", "</crossBin>", pos);
+    if (pos == std::string::npos) break;
+
+    size_t name_pos = 0;
+    const std::string name = next_element(element, "name=\"", "\"", name_pos);
+    std::string expected = "&lt;";
+    size_t index_pos = 0;
+    while (true) {
+      const std::string index = next_element(element, "<index>", "</index>", index_pos);
+      if (index_pos == std::string::npos) break;
+      expected += (expected == "&lt;" ? "" : ",") + index;
+    }
+    expected += "&gt;";
+
+    EXPECT_EQ(name, expected);
+    names.insert(name);
+  }
+  EXPECT_EQ(names.size(), 6u);
 
   fc4sc::global::delete_context(cntxt);
 }
