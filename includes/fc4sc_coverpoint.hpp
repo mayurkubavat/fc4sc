@@ -547,7 +547,7 @@ public:
       }  catch(const std::exception& e) {
         std::cerr << e.what() << "\n";
 	std::cerr << "sample_condition is not binded for coverpoint " << this->cvp_data->name << "\n";
-	throw e;
+	throw;
       }
       if (cond) {
         try {
@@ -555,7 +555,7 @@ public:
 	} catch(const std::exception& e) {
 	  std::cerr << e.what() << "\n";
 	  std::cerr << "sample_expression is not binded for coverpoint " << this->cvp_data->name << "\n";
-	  throw e;
+	  throw;
 	}
       }
       else {
