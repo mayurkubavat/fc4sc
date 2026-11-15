@@ -44,25 +44,25 @@
 struct cvg_option
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
 
   /*! Minimum of hits for each bin */
-  uint at_least;
+  unsigned int at_least;
 
   /*! !UNIPLEMENTED! Max number of generated bins */
-  uint auto_bin_max;
+  unsigned int auto_bin_max;
 
   /*! !UNIPLEMENTED! Issue warning if bins overlap in cvp */
   bool detect_overlap;
 
   /*! !UNIPLEMENTED! Number of missing bins in crosses to be printed */
-  uint cross_num_print_missing;
+  unsigned int cross_num_print_missing;
 
   /*! !UNIPLEMENTED! Collect coverage per instance */
   bool per_instance;
@@ -95,19 +95,19 @@ struct cvg_option
 struct cvp_option
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
 
   /*! Minimum of hits for each bin */
-  uint at_least;
+  unsigned int at_least;
 
   /*! !UNIPLEMENTED! Max number of generated bins */
-  uint auto_bin_max;
+  unsigned int auto_bin_max;
 
   /*! !UNIPLEMENTED! Issue warning if bins overlap in cvp */
   bool detect_overlap;
@@ -133,19 +133,19 @@ struct cvp_option
 struct cross_option // cross option declaration
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
 
   /*! Minimum of hits for each bin */
-  uint at_least;
+  unsigned int at_least;
 
   /*! !UNIPLEMENTED! Number of missing bins in crosses to be printed */
-  uint cross_num_print_missing;
+  unsigned int cross_num_print_missing;
 
   /*!
    * \brief Sets all values to default
@@ -167,10 +167,10 @@ struct cross_option // cross option declaration
 struct cvg_type_option // covergroup type_option declaration
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
