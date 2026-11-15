@@ -372,7 +372,6 @@ public:
            << "\" ";
     stream << ">\n";
     
-  //TODO: cross_num_print_missing is unimplemented
     auto& inst = base.option;
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
@@ -388,32 +387,14 @@ public:
       stream << "<crossExpr>" << cvp->name << "</crossExpr> \n";
     }
 
-    auto cross_bins = base.get_cross_bins();
+    // Write the bins of the cross which were hit, and the missing bins
+    // (never hit) up to option.cross_num_print_missing, as in SystemVerilog.
+    // A reader of the file only knows the bins found in it, so the coverage
+    // it computes is too high when missing bins are left out. Define
+    // FC4SC_SAVE_ALL_CROSS_BINS to write every missing bin.
+    const auto& cross_bins = base.get_cross_bins();
 
-    if (cross_bins.empty())
-    {
-      //edge case where crossbin is never sampled
-      stream << "<crossBin \n";
-      stream << "name=\""
-             << ""
-             << "\"  \n";
-      stream << "key=\"" << get_unique_key() << "\" \n";
-      stream << "type=\""
-             << "ignore"
-             << "\" \n";
-      stream << "> \n";
-
-      for (unsigned int i = 0; i < base.get_cross_bins().size(); i++) 
-       stream << "<index>" << 0 << "</index>\n";
-
-      stream << "<contents \n";
-      stream << "coverageCount=\"" << 0 << "\"> \n";
-      stream << "</contents> \n";
-
-      stream << "</crossBin> \n";
-    }
-
-    for (auto& bin : cross_bins)
+    auto write_bin = [&](const std::vector<size_t>& indices, uint64_t count)
     {
       stream << "<crossBin \n";
       stream << "name=\""
@@ -424,17 +405,75 @@ public:
       //stream << "type=\""
       //       << "default"
       //       << "\" \n";
-    
+
       stream << "> \n";
 
-      for (auto& index : bin.first)
+      for (auto& index : indices)
         stream << "<index>" << index << "</index>\n";
 
       stream << "<contents \n";
-      stream << "coverageCount=\"" << bin.second << "\"> \n";
+      stream << "coverageCount=\"" << count << "\"> \n";
       stream << "</contents> \n";
 
       stream << "</crossBin> \n";
+    };
+
+    // number of bins of each crossed coverpoint
+    std::vector<size_t> sizes;
+    bool has_bins = !base.cross_cvps.empty();
+
+    for (auto &cvp : base.cross_cvps)
+    {
+      sizes.push_back(cvp->size());
+      has_bins = has_bins && (cvp->size() != 0);
+    }
+
+    // The bins are written in the order of their indices, the last
+    // coverpoint counting fastest, which is also the order of cross_bins.
+    std::vector<size_t> indices(sizes.size(), 0);
+
+#ifdef FC4SC_SAVE_ALL_CROSS_BINS
+    const bool all_missing = true;
+    const uint64_t missing_limit = 0;
+#else
+    const bool all_missing = false;
+    // The schema requires at least one crossBin: when no bin was hit, the
+    // first missing bin is written even if no missing bins are requested.
+    uint64_t missing_limit = inst.cross_num_print_missing;
+    if (cross_bins.empty() && missing_limit == 0)
+      missing_limit = 1;
+#endif
+
+    // Visit the combinations while missing bins are still to be written
+    uint64_t missing_written = 0;
+
+    while (has_bins && (all_missing || missing_written < missing_limit))
+    {
+      auto hit = cross_bins.find(indices);
+
+      if (hit != cross_bins.end())
+        write_bin(indices, hit->second);
+      else
+      {
+        write_bin(indices, 0);
+        missing_written++;
+      }
+
+      // advance to the next combination, the last coverpoint counts fastest
+      size_t pos = indices.size();
+      while (pos > 0 && ++indices[pos - 1] == sizes[pos - 1])
+      {
+        indices[pos - 1] = 0;
+        pos--;
+      }
+      has_bins = (pos != 0);
+    }
+
+    // then only the remaining bins which were hit
+    if (has_bins)
+    {
+      for (auto it = cross_bins.lower_bound(indices); it != cross_bins.end(); it++)
+        write_bin(it->first, it->second);
     }
 
       stream << "</cross>\n"; 
