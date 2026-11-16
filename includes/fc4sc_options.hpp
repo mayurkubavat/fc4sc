@@ -177,7 +177,9 @@ struct cvg_type_option // covergroup type_option declaration
 
   /*!
    * Computes the type coverage on the union of the bins of all instances
-   * instead of as the weighted average of the instance coverages
+   * instead of as the weighted average of the instance coverages. The
+   * options of the coverpoints and crosses are taken from the first enabled
+   * instance.
    */
   bool merge_instances;
 

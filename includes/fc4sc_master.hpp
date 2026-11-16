@@ -355,6 +355,8 @@ private:
  * same bin, their hits are added up, and the type coverage is computed on
  * the merged bins as if they were the bins of a single instance. Cross bins
  * are merged in the same way, by the names of the bins they are made of.
+ * The at_least, goal and weight options of a merged coverpoint or cross are
+ * those of the first enabled instance which has it.
  */
 class merged_coverage : public covVisitorBase
 {
