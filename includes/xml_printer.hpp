@@ -69,8 +69,9 @@ public:
     stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
            << "\n";
     stream << "<UCIS xmlns=\"UCIS\" xmlns:ucis=\"http://www.w3.org/2001/XMLSchema-instance\" ucisVersion=\"1.0\" ";
+    const char* writer = getenv("USER");
     stream << " writtenBy=\""
-           << getenv("USER")
+           << escape_xml_chars(writer ? writer : "")
            << "\"\n";
 
     std::time_t cur_time = std::time(0);
@@ -89,7 +90,7 @@ public:
     {
       stream << "<sourceFiles ";
       stream << " fileName=\""
-	     << fname_it.second
+	     << escape_xml_chars(fname_it.second)
 	     << "\"";
       stream << " id=\""
              << fname_it.first
@@ -149,8 +150,9 @@ public:
 	   << time_now->tm_sec/10 << time_now->tm_sec%10
            << "\" \n";
       
+    const char* user = getenv("USER");
     stream << "userName=\""
-           << getenv("USER")
+           << escape_xml_chars(user ? user : "")
            << "\" \n";
     /*
     stream << "cost=\""
@@ -526,7 +528,8 @@ public:
   }
 
   /*!
-   *  \brief Function which returns a string where all XML special characters are escaped.
+   *  \brief Function which returns a string where all XML special characters are escaped,
+   *  and the control characters which XML 1.0 does not allow are replaced with '?'.
    *
    *  \param in The input string
    */
@@ -540,7 +543,17 @@ public:
         case '&': out += "&amp;"; break;
         case '\"': out += "&quot;"; break;
         case '\'': out += "&apos;"; break;
-        default: out += in[idx];
+        // white space is written as references, so that it is kept in
+        // attribute values
+        case '\t': out += "&#9;"; break;
+        case '\n': out += "&#10;"; break;
+        case '\r': out += "&#13;"; break;
+        default:
+          // the other control characters are not allowed in XML 1.0
+          if (static_cast<unsigned char>(in[idx]) < 0x20)
+            out += '?';
+          else
+            out += in[idx];
       }
     }
     return out;

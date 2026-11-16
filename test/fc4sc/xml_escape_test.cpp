@@ -86,3 +86,21 @@ TEST(xml_escape, names_and_comments) {
 
   fc4sc::global::delete_context(cntxt);
 }
+
+TEST(xml_escape, file_names_and_control_characters) {
+  auto cntxt = fc4sc::global::create_new_context();
+  xml_escape_cg cg("cg", "/src/R&D/\"cov\".cpp", 1, cntxt);
+  cg.option().comment = std::string("ctl\x01" "char\tand\nlines");
+  cg.sample(0, 0);
+
+  const std::string file = "xml_escape_file_names_and_control_characters.xml";
+  xml_printer::coverage_save(file, cntxt);
+  const std::string xml = read_file(file);
+
+  EXPECT_NE(xml.find("fileName=\"/src/R&amp;D/&quot;cov&quot;.cpp\""), std::string::npos);
+  // characters XML 1.0 does not allow are replaced, white space is kept
+  EXPECT_EQ(xml.find('\x01'), std::string::npos);
+  EXPECT_NE(xml.find("comment=\"ctl?char&#9;and&#10;lines\""), std::string::npos);
+
+  fc4sc::global::delete_context(cntxt);
+}
