@@ -410,3 +410,54 @@ TEST(transition_bin, expansion_is_bounded) {
   double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   EXPECT_LT(seconds, 2.0);
 }
+
+class transition_many_cvg : public covergroup {
+public:
+  CG_CONS(transition_many_cvg) {};
+
+  int x = 0;
+
+  // bins any = ([0:255] => [0:255]); 65536 value sequences
+  COVERPOINT(int, cvp, x) {
+    transition_bin<int>("any", trans<int>(interval(0, 255), interval(0, 255)))
+  };
+};
+
+class transition_few_cvg : public covergroup {
+public:
+  CG_CONS(transition_few_cvg) {};
+
+  int x = 0;
+
+  // bins few = (254,255 => 254,255); 4 value sequences
+  COVERPOINT(int, cvp, x) {
+    transition_bin<int>("few", trans<int>(interval(254, 255), interval(254, 255)))
+  };
+};
+
+// Returns the time to sample n alternating values
+template <typename CVG>
+static double sample_time(CVG& cvg, int n) {
+  auto start = std::chrono::steady_clock::now();
+  for (int i = 0; i < n; ++i) {
+    cvg.x = 255 - (i % 2);
+    cvg.sample();
+  }
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+TEST(transition_bin, sampling_does_not_scale_with_sequences) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    transition_many_cvg many("many", __FILE__, __LINE__, cntxt);
+    transition_few_cvg few("few", __FILE__, __LINE__, cntxt);
+    const int n = 20000;
+    double few_time = sample_time(few, n);
+    double many_time = sample_time(many, n);
+    EXPECT_EQ(many.cvp.get_bin_hit_count(0), uint64_t(n - 1));
+    EXPECT_EQ(few.cvp.get_bin_hit_count(0), uint64_t(n - 1));
+    // a bin with 65536 sequences samples about as fast as one with 4
+    EXPECT_LT(many_time, 20 * few_time + 0.01);
+  }
+  fc4sc::global::delete_context(cntxt);
+}

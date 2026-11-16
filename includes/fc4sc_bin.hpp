@@ -905,22 +905,45 @@ public:
     return sequences_int;
   }
 
+  /*! Index of each sequence, by its values */
+  std::map<std::vector<T>, size_t> index;
+
+  /*! The lengths of the sequences, shortest first */
+  std::vector<size_t> lengths;
+
+  /*! Builds the index of the sequences, after they are all added */
+  void build_index()
+  {
+    index.clear();
+    lengths.clear();
+    for (size_t i = 0; i < sequences.size(); ++i)
+    {
+      index.insert(std::make_pair(sequences[i], i));
+      lengths.push_back(sequences[i].size());
+    }
+    std::sort(lengths.begin(), lengths.end());
+    lengths.erase(std::unique(lengths.begin(), lengths.end()), lengths.end());
+  }
+
   /*!
    * \brief Checks if the last sampled values end with one of the sequences
-   * of this bin. Increments the hit count of the first such sequence.
+   * of this bin. Increments the hit count of the shortest such sequence.
    * \param history The last sampled values, the oldest first
    * \param max_length Length of the longest sequence which may be hit
    * \returns Index of the sequence which was hit, or -1
    */
   int sample(const std::deque<T>& history, size_t max_length)
   {
-    for (size_t i = 0; i < sequences.size(); ++i)
+    max_length = std::min(max_length, history.size());
+    std::vector<T> last;
+    for (auto length : lengths)
     {
-      const std::vector<T>& seq = sequences[i];
-      if (seq.size() > history.size() || seq.size() > max_length) continue;
-      if (std::equal(seq.rbegin(), seq.rend(), history.rbegin())) {
-        this->interval_hits[i]++;
-        return static_cast<int>(i);
+      if (length > max_length) break;
+      last.assign(history.end() - length, history.end());
+      auto it = index.find(last);
+      if (it != index.end()) {
+        this->interval_hits[it->second]++;
+        return static_cast<int>(it->second);
       }
     }
     return -1;
@@ -935,8 +958,9 @@ public:
  * coverpoint match one of its transitions. The SystemVerilog
  * "bins b = (1 => 2 => 3), (5 => 6);" is written
  * transition_bin<int>("b", trans<int>(1, 2, 3), trans<int>(5, 6)).
- * The bin is hit at most once per sample, and a transition which has a value
- * of an ignore bin in it is not hit.
+ * The bin is hit at most once per sample: if several of its sequences end
+ * with a sample, the shortest one is counted. A transition which has a
+ * value of an ignore bin in it is not hit.
  */
 template <class T>
 class transition_bin : public bin<T>
@@ -998,6 +1022,7 @@ protected:
         cvp.cvp_data->bins_data.push_back(this->bin_data);
         break;
     }
+    trans_data()->build_index();
     for (auto &seq : trans_data()->sequences)
       cvp.trans_depth = std::max<size_t>(cvp.trans_depth, seq.size());
   }
