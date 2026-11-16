@@ -333,6 +333,33 @@ public:
   }
 
   /*!
+   *  \brief Computes the type coverage of this cross: its coverage
+   *  across all the instances of the covergroup type it is in
+   *  \returns Coverage value as a double between 0 and 100
+   */
+  double get_coverage() const
+  {
+    int covered = 0;
+    int total = 0;
+    return this->get_coverage(covered, total);
+  }
+
+  /*!
+   *  \brief Computes the type coverage of this cross
+   *  \param covered Number of covered bins, summed over the instances
+   *  \param total Total number of bins, summed over the instances
+   *  \returns Coverage value as a double between 0 and 100
+   */
+  double get_coverage(int &covered, int &total) const
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return fc4sc::global::get_cvp_coverage(crs_data, covered, total);
+  }
+
+  /*!
    * \brief Enables sampling
    */
   void start()

@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <fstream>
 #include <stdint.h>
+#include <algorithm>
 #include <cstdlib>
 #include <chrono>
 #include <ctime>
@@ -591,6 +592,61 @@ public:
   static double get_coverage(const std::string &scp_type, const std::string &type, int &hit_bins, int &total_bins, fc4sc::global* cvg_cntxt = fc4sc::global::getter())
   {
     return cvg_cntxt->internal_get_coverage(scp_type, type, hit_bins, total_bins);
+  }
+
+  /*!
+   * \brief Computes the type coverage of a coverpoint or cross
+   *
+   * The type coverage of a coverpoint or cross is the weighted average of
+   * its coverage in each enabled instance of the covergroup type it is in,
+   * with the weights of these covergroup instances, as for the type
+   * coverage of the covergroup. It is 100 if no instance is enabled or all
+   * the weights are 0. A coverpoint or cross which is in no covergroup is
+   * its only instance.
+   * \param cvp Data of the coverpoint or cross
+   * \param covered Number of covered bins, summed over the instances
+   * \param total Total number of bins, summed over the instances
+   * \returns Double between 0 and 100
+   */
+  static double get_cvp_coverage(cvp_base_data_model* cvp, int &covered, int &total)
+  {
+    covered = 0;
+    total = 0;
+
+    std::vector<cvp_base_data_model*> insts;
+    std::vector<double> weights;
+    cvg_base_data_model* cvg = cvp->parent_cvg;
+
+    if (cvg == nullptr || cvg->type_data == nullptr) {
+      insts.push_back(cvp);
+      weights.push_back(1);
+    }
+    else {
+      // all the instances of a covergroup type have the same coverpoints
+      // and crosses, in the same order
+      size_t index = std::find(cvg->cvps.begin(), cvg->cvps.end(), cvp) - cvg->cvps.begin();
+      for (auto inst : cvg->type_data->cvg_insts)
+      {
+        if (!inst->enable || index >= inst->cvps.size() || inst->cvps[index]->name != cvp->name)
+          continue;
+        insts.push_back(inst->cvps[index]);
+        weights.push_back(inst->option.weight);
+      }
+    }
+
+    double res = 0;
+    double weight_sum = 0;
+    for (size_t i = 0; i < insts.size(); ++i)
+    {
+      general_coverage data_visitor;
+      insts[i]->accept_visitor(data_visitor);
+      covered += data_visitor.bin_covered;
+      total += data_visitor.bin_total;
+      res += data_visitor.cvp_res * weights[i];
+      weight_sum += weights[i];
+    }
+
+    return (weight_sum == 0) ? 100 : res / weight_sum;
   }
 
   static bool is_empty(fc4sc::global* cvg_cntxt = fc4sc::global::getter())
