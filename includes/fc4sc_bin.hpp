@@ -938,14 +938,21 @@ public:
    * of this bin. Increments the hit count of the shortest such sequence.
    * \param history The last sampled values, the oldest first
    * \param max_length Length of the longest sequence which may be hit
+   * \param excluded Lengths of the last values which are not to be hit, as
+   * they are an ignored sequence, or nullptr
+   * \param matched Returns the lengths of all the sequences which end with
+   * this sample, if not nullptr
    * \returns Index of the sequence which was hit, or -1
    *
    * The history is read once from the newest value backwards, so the time
    * depends on the length of the longest sequence only.
    */
-  int sample(const std::deque<T>& history, size_t max_length)
+  int sample(const std::deque<T>& history, size_t max_length,
+             const std::vector<size_t>* excluded = nullptr,
+             std::vector<size_t>* matched = nullptr)
   {
     max_length = std::min(max_length, history.size());
+    int hit = -1;
     size_t node = 0;
     for (size_t length = 1; length <= max_length; ++length)
     {
@@ -953,12 +960,16 @@ public:
       if (edge == trie.end()) break;
       node = edge->second;
       const int seq = trie_sequence[node];
-      if (seq >= 0) {
+      if (seq < 0) continue;
+      if (matched != nullptr) matched->push_back(length);
+      if (hit < 0 && (excluded == nullptr ||
+          std::find(excluded->begin(), excluded->end(), length) == excluded->end())) {
         this->interval_hits[seq]++;
-        return seq;
+        hit = seq;
+        if (matched == nullptr) break;
       }
     }
-    return -1;
+    return hit;
   }
 };
 
@@ -1145,8 +1156,8 @@ public:
 };
 
 /*!
- * \brief Defines a class for ignore transition bins: in a sample which
- * completes one of their transitions, no transition bin is hit
+ * \brief Defines a class for ignore transition bins: the value sequences of
+ * their transitions are excluded from the other transition bins
  * \tparam T Type of values in this bin
  */
 template <class T>

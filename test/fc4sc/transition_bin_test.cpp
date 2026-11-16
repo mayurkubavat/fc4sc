@@ -184,10 +184,13 @@ TEST(transition_bin, ignore) {
   auto cntxt = fc4sc::global::create_new_context();
   {
     transition_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    // only the ignored transition 0 => 1 => 2 is excluded, and not the
+    // transition 1 => 2 which ends with the same sample
     cvg.sample({0, 1, 2});
-    EXPECT_EQ(cvg.mixed.get_bin_hit_count(1), 0u);
-    cvg.sample({5, 1, 2});
     EXPECT_EQ(cvg.mixed.get_bin_hit_count(1), 1u);
+    EXPECT_EQ(cvg.mixed.get_ignore_bins_base()[0]->get_hitcount(), 1u);
+    cvg.sample({5, 1, 2});
+    EXPECT_EQ(cvg.mixed.get_bin_hit_count(1), 2u);
   }
   fc4sc::global::delete_context(cntxt);
 }
@@ -483,6 +486,45 @@ TEST(transition_bin, sampling_does_not_scale_with_sequences) {
     lengths.x = 2;
     lengths.sample();
     EXPECT_EQ(lengths.cvp.get_bin_hit_count(0), 1u);
+  }
+  fc4sc::global::delete_context(cntxt);
+}
+
+class transition_ignore_trans_cvg : public covergroup {
+public:
+  CG_CONS(transition_ignore_trans_cvg) {};
+
+  int x = 0;
+
+  void sample(std::initializer_list<int> values) {
+    for (int v : values) {
+      this->x = v;
+      covergroup::sample();
+    }
+  }
+
+  // bins sixes = (5 => 6), (4 => 5 => 6);
+  // ignore_bins ign = (5 => 6);
+  // illegal_bins bad = (5 => 6), (8 => 8);
+  COVERPOINT(int, cvp, x) {
+    transition_bin<int>("sixes", trans<int>(5, 6), trans<int>(4, 5, 6)),
+    ignore_transition_bin<int>("ign", trans<int>(5, 6)),
+    illegal_transition_bin<int>("bad", trans<int>(5, 6), trans<int>(8, 8))
+  };
+};
+
+TEST(transition_bin, ignored_transitions) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    transition_ignore_trans_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    // 5 => 6 is ignored in all the bins, also in the illegal bin
+    cvg.sample({3, 5, 6});
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(0), 0u);
+    // the longer sequence of the bin which ends with 5 => 6 is not ignored
+    cvg.sample({4, 5, 6});
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(0), 1u);
+    EXPECT_EQ(cvg.cvp.get_ignore_bins_base()[0]->get_hitcount(), 2u);
+    EXPECT_THROW(cvg.sample({8, 8}), fc4sc::illegal_bin_sample_exception);
   }
   fc4sc::global::delete_context(cntxt);
 }

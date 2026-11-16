@@ -384,16 +384,18 @@ private:
     trans_clean = ignored ? 0 : std::min(trans_clean + 1, trans_depth);
     if (ignored) return;
 
+    // the lengths of the last values which are an ignored sequence
+    std::vector<size_t> ignored_lengths;
     for (auto index : this->trans_ignore_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data);
-      if (data->sample(trans_history, trans_clean) >= 0) return;
+      data->sample(trans_history, trans_clean, nullptr, &ignored_lengths);
     }
 
     for (auto index : this->trans_illegal_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->illegal_bins[index].bin_data);
-      int seq = data->sample(trans_history, trans_clean);
+      int seq = data->sample(trans_history, trans_clean, &ignored_lengths);
       if (seq >= 0) {
         std::stringstream ss;
         for (size_t i = 0; i < data->sequences[seq].size(); ++i)
@@ -408,7 +410,7 @@ private:
     for (auto index : this->trans_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->bins[index].bin_data);
-      if (data->sample(trans_history, trans_clean) >= 0) {
+      if (data->sample(trans_history, trans_clean, &ignored_lengths) >= 0) {
         this->last_bin_index_hit = index;
         this->last_sample_success = true;
       }
