@@ -359,3 +359,32 @@ TEST(transition_bin, ignored_values) {
   }
   fc4sc::global::delete_context(cntxt);
 }
+
+class transition_bool_cvg : public covergroup {
+public:
+  CG_CONS(transition_bool_cvg) {};
+
+  bool b = false;
+
+  COVERPOINT(bool, cvp, b) {
+    transition_bin<bool>("rise", trans<bool>(false, true)),
+    transition_bin<bool>("fall", trans<bool>(true, false))
+  };
+};
+
+TEST(transition_bin, bool_type) {
+  EXPECT_EQ(trans<bool>(interval(false, true), true).sequences(),
+            (std::vector<std::vector<bool>>{{false, true}, {true, true}}));
+
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    transition_bool_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    for (bool v : {false, true, true, false}) {
+      cvg.b = v;
+      cvg.sample();
+    }
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(0), 1u);
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(1), 1u);
+  }
+  fc4sc::global::delete_context(cntxt);
+}

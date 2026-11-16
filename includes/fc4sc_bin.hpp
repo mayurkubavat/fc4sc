@@ -605,6 +605,15 @@ public:
 static const uint64_t trans_max_sequences = 1 << 16;
 
 /*!
+ * \brief Unsigned type with the bits of T, also for bool
+ */
+template <typename T, bool = std::is_same<T, bool>::value>
+struct trans_unsigned { typedef typename std::make_unsigned<T>::type type; };
+
+template <typename T>
+struct trans_unsigned<T, true> { typedef unsigned char type; };
+
+/*!
  * \brief Consecutive repetition of a transition step, see \link fc4sc::repeat \endlink
  * \tparam S Type of the repeated step
  */
@@ -725,6 +734,8 @@ class trans
     count *= n;
   }
 
+  typedef typename trans_unsigned<T>::type U;
+
   /*! Number of values in a step */
   static uint64_t values_count(const std::vector<interval_t<T>>& set)
   {
@@ -732,7 +743,6 @@ class trans
     for (auto &intv : set)
     {
       // number of values in the interval, without overflow
-      typedef typename std::make_unsigned<T>::type U;
       U length = static_cast<U>(static_cast<U>(intv.second) - static_cast<U>(intv.first));
       if (length >= trans_max_sequences)
         throw std::invalid_argument("Transition expands to too many value sequences");
@@ -800,11 +810,11 @@ public:
         {
           for (auto &intv : *set)
           {
-            for (T v = intv.first; ; ++v)
+            const U length = static_cast<U>(static_cast<U>(intv.second) - static_cast<U>(intv.first));
+            for (uint64_t k = 0; k <= length; ++k)
             {
               next.push_back(seq);
-              next.back().push_back(v);
-              if (v == intv.second) break;
+              next.back().push_back(static_cast<T>(static_cast<U>(static_cast<U>(intv.first) + k)));
             }
           }
         }
