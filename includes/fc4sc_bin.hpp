@@ -71,6 +71,11 @@ static std::vector<interval_t<T>> intersection(const bin<T>& lhs, const std::vec
 static const uint64_t wildcard_max_intervals = 1 << 16;
 
 /*!
+ * \brief Maximum size of a wildcard pattern written as a sized literal
+ */
+static const uint64_t wildcard_max_size = 1 << 16;
+
+/*!
  *  \brief Parses a wildcard pattern into the bits to match and their values
  *  \param pattern The pattern, see \link fc4sc::wildcard \endlink
  *  \param width Number of bits of the coverpoint type
@@ -84,12 +89,20 @@ inline void parse_wildcard(const std::string& pattern, unsigned int width,
   std::string digits = pattern;
   unsigned int digit_bits = 1;
   size_t size = 0;
+  bool literal = false;
+  bool is_signed = false;
 
   size_t quote = pattern.find('\'');
   if (quote != std::string::npos) {
-    if (quote + 1 >= pattern.size())
+    literal = true;
+    size_t base = quote + 1;
+    if (base < pattern.size() && (pattern[base] == 's' || pattern[base] == 'S')) {
+      is_signed = true;
+      ++base;
+    }
+    if (base >= pattern.size())
       throw std::invalid_argument(error + "missing base");
-    switch (pattern[quote + 1]) {
+    switch (pattern[base]) {
       case 'b': case 'B': digit_bits = 1; break;
       case 'o': case 'O': digit_bits = 3; break;
       case 'h': case 'H': digit_bits = 4; break;
@@ -98,11 +111,15 @@ inline void parse_wildcard(const std::string& pattern, unsigned int width,
     if (quote > 0) {
       if (pattern.find_first_not_of("0123456789") < quote)
         throw std::invalid_argument(error + "bad size");
-      size = std::stoul(pattern.substr(0, quote));
+      for (size_t i = 0; i < quote; ++i) {
+        size = size * 10 + (pattern[i] - '0');
+        if (size > wildcard_max_size)
+          throw std::invalid_argument(error + "size is larger than 65536");
+      }
       if (size == 0)
         throw std::invalid_argument(error + "bad size");
     }
-    digits = pattern.substr(quote + 2);
+    digits = pattern.substr(base + 1);
   }
 
   // bits of the pattern, LSB first: 0, 1 or 2 for a don't care bit
@@ -147,13 +164,25 @@ inline void parse_wildcard(const std::string& pattern, unsigned int width,
     }
   }
 
+  if (bits.size() < width) {
+    if (literal && size == 0 && bits.back() == 2) {
+      // an unsized literal whose leftmost bit is x is extended with x
+      bits.resize(width, 2);
+    }
+    else if (is_signed && size > 0) {
+      // a sized signed literal is sign extended
+      bits.resize(width, bits.back());
+    }
+  }
+
   value = 0;
   // bits above the pattern are zero, so they must be matched
   care = (width >= 64) ? ~uint64_t(0) : ((uint64_t(1) << width) - 1);
   for (size_t i = 0; i < bits.size(); ++i)
   {
     if (i >= width) {
-      if (bits[i] != 0)
+      // bits above the type must be zero or don't care
+      if (bits[i] == 1)
         throw std::invalid_argument(error + "wider than the coverpoint type");
       continue;
     }
@@ -170,7 +199,11 @@ inline void parse_wildcard(const std::string& pattern, unsigned int width,
  *  don't care bits and _ is ignored, as in "1??0" or "10_xx". The pattern may
  *  also be written as a SystemVerilog literal with a 'b, 'o or 'h base and an
  *  optional size, as in "4'b1??0" or "'h3?", where an x digit is a don't care
- *  digit. Bits above the pattern must be zero.
+ *  digit. As for SystemVerilog literals, an unsized literal whose leftmost
+ *  digit is x is extended with don't care bits, and a sized signed literal
+ *  ('sb, 'so or 'sh) is sign extended to the type. Other bits above the
+ *  pattern are zero. Bits of the pattern above the type must be zero or
+ *  don't care.
  *  \returns The matching values, as sorted and disjoint intervals
  *
  *    The SystemVerilog "wildcard bins b = { 4'b11?? };" is written

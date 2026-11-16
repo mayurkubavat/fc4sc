@@ -15,6 +15,7 @@
    limitations under the License.
 
 ******************************************************************************/
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <sstream>
@@ -67,7 +68,7 @@ TEST(wildcard_bin, signed_types) {
   EXPECT_EQ(even_negative.back(), (fc4sc::interval_t<int8_t>{-2, -2}));
   EXPECT_EQ(wildcard<int8_t>("8'b1111111?"), (s8_intervals{{-2, -1}}));
   EXPECT_EQ(wildcard<int8_t>("7'b???????"), (s8_intervals{{0, 127}}));
-  EXPECT_EQ(wildcard<int64_t>("'h?"), (std::vector<fc4sc::interval_t<int64_t>>{{0, 15}}));
+  EXPECT_EQ(wildcard<int64_t>("4'h?"), (std::vector<fc4sc::interval_t<int64_t>>{{0, 15}}));
 }
 
 TEST(wildcard_bin, values) {
@@ -83,7 +84,7 @@ TEST(wildcard_bin, bad_patterns) {
   EXPECT_THROW(wildcard<uint8_t>("'hg"), std::invalid_argument);
   // 2^17 intervals: 17 don't care bits above a bit to match
   EXPECT_THROW(wildcard<uint32_t>("'b" + std::string(17, '?') + "0"), std::invalid_argument);
-  EXPECT_EQ(wildcard<uint32_t>("'b" + std::string(16, '?') + "0").size(), 1u << 16);
+  EXPECT_EQ(wildcard<uint32_t>("'b1" + std::string(16, '?') + "0").size(), 1u << 16);
   EXPECT_EQ(wildcard<uint32_t>("32'b1" + std::string(31, '?')),
             (std::vector<fc4sc::interval_t<uint32_t>>{{0x80000000u, 0xffffffffu}}));
   // zero bits above the type are allowed
@@ -154,4 +155,40 @@ TEST(wildcard_bin, sampling) {
   ASSERT_NE(pos, std::string::npos);
   EXPECT_NE(xml.find("from=\"9\" \nto =\"9\"", pos), std::string::npos);
   EXPECT_NE(xml.find("from=\"11\" \nto =\"11\"", pos), std::string::npos);
+}
+
+TEST(wildcard_bin, literal_extension) {
+  // an unsized literal whose leftmost digit is x is extended with x
+  EXPECT_EQ(wildcard<uint32_t>("'hx"),
+            (std::vector<fc4sc::interval_t<uint32_t>>{{0, 0xffffffffu}}));
+  EXPECT_EQ(wildcard<uint8_t>("'bz"), (u8_intervals{{0, 255}}));
+  EXPECT_EQ(wildcard<uint8_t>("'b?1").size(), 128u);
+  EXPECT_EQ(wildcard<uint8_t>("'b?1").back(), (fc4sc::interval_t<uint8_t>{255, 255}));
+  // but an unsized literal with a known leftmost digit is not
+  EXPECT_EQ(wildcard<uint8_t>("'h1?"), (u8_intervals{{16, 31}}));
+
+  // bits above the type which are x do not matter
+  EXPECT_EQ(wildcard<uint8_t>("12'hx0F"), (u8_intervals{{15, 15}}));
+  EXPECT_EQ(wildcard<uint8_t>("12'b??_1111_1111"), (u8_intervals{{255, 255}}));
+  EXPECT_THROW(wildcard<uint8_t>("12'h10F"), std::invalid_argument);
+}
+
+TEST(wildcard_bin, signed_literals) {
+  // a signed literal is sign extended to the type
+  EXPECT_EQ(wildcard<int8_t>("4'sb1???"), (s8_intervals{{-8, -1}}));
+  EXPECT_EQ(wildcard<uint8_t>("4'sb1???"), (u8_intervals{{248, 255}}));
+  EXPECT_EQ(wildcard<int8_t>("4'Sb0???"), (s8_intervals{{0, 7}}));
+  EXPECT_EQ(wildcard<int8_t>("'sh1?"), (s8_intervals{{16, 31}}));
+  s8_intervals multiples_of_8 = wildcard<int8_t>("4'sb?000");
+  ASSERT_EQ(multiples_of_8.size(), 32u);
+  EXPECT_EQ(multiples_of_8.front(), (fc4sc::interval_t<int8_t>{-128, -128}));
+  EXPECT_EQ(multiples_of_8.back(), (fc4sc::interval_t<int8_t>{120, 120}));
+}
+
+TEST(wildcard_bin, bad_sizes) {
+  EXPECT_THROW(wildcard<uint8_t>("99999999999999999999'b1"), std::invalid_argument);
+  auto start = std::chrono::steady_clock::now();
+  EXPECT_THROW(wildcard<uint8_t>("200000000'b1"), std::invalid_argument);
+  EXPECT_LT(std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), 1.0);
+  EXPECT_THROW(wildcard<uint8_t>("0'b1"), std::invalid_argument);
 }
