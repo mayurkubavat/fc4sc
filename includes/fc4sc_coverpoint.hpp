@@ -40,6 +40,7 @@
 #include <functional>
 #include <tuple>
 #include <algorithm> // std::find
+#include <set>
 
 #include "fc4sc_bin.hpp"
 
@@ -212,6 +213,33 @@ private:
   /*! Sampling switch */
   bool collect = true;
 
+  /*! Whether option.detect_overlap has been looked at */
+  bool overlap_checked = false;
+
+  /*!
+   *  \brief Prints a warning for each pair of regular bins whose values
+   *  overlap, for option.detect_overlap
+   */
+  void report_overlapping_bins()
+  {
+    std::set<std::pair<unsigned int, unsigned int>> reported;
+    for (auto &entry : regular_interval_map)
+    {
+      std::set<unsigned int> bin_indexes;
+      for (auto &bin_range : entry.second)
+        bin_indexes.insert(bin_range.first);
+      for (auto first = bin_indexes.begin(); first != bin_indexes.end(); ++first)
+        for (auto second = std::next(first); second != bin_indexes.end(); ++second)
+        {
+          if (!reported.insert(std::make_pair(*first, *second)).second)
+            continue;
+          std::cerr << "Warning: bins " << bins[*first].name() << " and "
+                    << bins[*second].name() << " of coverpoint "
+                    << cvp_data->name << " overlap\n";
+        }
+    }
+  }
+
   coverpoint<T>& operator=(coverpoint<T>& rh) = delete;
 
   /*
@@ -358,6 +386,11 @@ private:
     return;
 #endif
     if (!collect) return;
+    if (!overlap_checked) {
+      overlap_checked = true;
+      if (cvp_data->option.detect_overlap)
+        report_overlapping_bins();
+    }
     this->last_sample_success = false;
 
     // 1) Search if the value is in the ignore bins

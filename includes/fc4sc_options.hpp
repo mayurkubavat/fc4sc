@@ -109,7 +109,8 @@ struct cvp_option
   /*! !UNIPLEMENTED! Max number of generated bins */
   uint auto_bin_max;
 
-  /*! !UNIPLEMENTED! Issue warning if bins overlap in cvp */
+  /*! Issue a warning, on the first sample, for each pair of regular bins
+   *  of the coverpoint which have values in common */
   bool detect_overlap;
 
   /*!
