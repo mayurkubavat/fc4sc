@@ -238,11 +238,11 @@ private:
   /*!
    *  \brief Build interval map from bin
    */
-  void build_interval_map(interval_map_t& interval_map, bin<T>& bin)
+  void build_interval_map(interval_map_t& interval_map, bin<T>& bin, unsigned int bin_key)
   {
     auto map_it = interval_map.begin();
     unsigned int i = 0;
-    std::vector<bin_range_t> entry{ {0,i} };
+    std::vector<bin_range_t> entry{ {bin_key,i} };
     auto& elem_entry = entry[0];
     for(auto it = bin.bin_data->intervals.begin();it != bin.bin_data->intervals.end(); it++)
     {
@@ -341,7 +341,7 @@ private:
   void insert_intervals(interval_map_t& interval_map, bin<T>& new_bin, unsigned int bin_key)
   {
     if(interval_map.empty()) {
-      build_interval_map(interval_map,new_bin);
+      build_interval_map(interval_map,new_bin,bin_key);
       return;
     }
     auto hint_it = interval_map.begin();

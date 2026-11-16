@@ -268,3 +268,51 @@ TEST(transition_bin, written_to_ucis_xml) {
   ASSERT_NE(pos, std::string::npos);
   EXPECT_NE(xml.find("type=\"ignore\"", pos), std::string::npos);
 }
+
+// A transition bin declared before the value bins of the same kind
+class transition_first_cvg : public covergroup {
+public:
+  CG_CONS(transition_first_cvg) {};
+
+  int x = 0;
+
+  void sample(std::initializer_list<int> values) {
+    for (int v : values) {
+      this->x = v;
+      covergroup::sample();
+    }
+  }
+
+  COVERPOINT(int, regular, x) {
+    transition_bin<int>("t12", trans<int>(1, 2)),
+    bin<int>("v2", 2)
+  };
+  COVERPOINT(int, ignore, x) {
+    bin<int>("v1", 1),
+    ignore_transition_bin<int>("t78", trans<int>(7, 8)),
+    ignore_bin<int>("v5", 5)
+  };
+  COVERPOINT(int, illegal, x) {
+    bin<int>("v1", 1),
+    illegal_transition_bin<int>("t78", trans<int>(7, 8)),
+    illegal_bin<int>("v6", 6)
+  };
+};
+
+TEST(transition_bin, declared_before_value_bins) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    transition_first_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    cvg.sample({1, 2});
+    EXPECT_EQ(cvg.regular.get_bin_hit_count(0), 1u);
+    EXPECT_EQ(cvg.regular.get_bin_hit_count(1), 1u);
+
+    cvg.sample({5});
+    EXPECT_EQ(cvg.ignore.get_misses(), 2u);
+    EXPECT_EQ(cvg.ignore.get_ignore_bins_base()[1]->get_hitcount(), 1u);
+
+    EXPECT_THROW(cvg.sample({6}), fc4sc::illegal_bin_sample_exception);
+    EXPECT_EQ(cvg.illegal.get_illegal_bins_base()[1]->get_hitcount(), 1u);
+  }
+  fc4sc::global::delete_context(cntxt);
+}
