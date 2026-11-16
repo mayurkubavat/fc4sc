@@ -437,6 +437,30 @@ public:
       has_bins = has_bins && (cvp->size() != 0);
     }
 
+    // A cross has no bins when one of its coverpoints has none, but the
+    // schema requires at least one crossBin. Write a single ignore bin
+    // instead, with the index -1, for no bin, for every crossed coverpoint.
+    if (!has_bins)
+    {
+      stream << "<crossBin \n";
+      stream << "name=\"&lt;";
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << (i == 0 ? "" : ",") << -1;
+      stream << "&gt;\"  \n";
+      stream << "key=\"" << get_unique_key() << "\" \n";
+      stream << "type=\"ignore\" \n";
+      stream << "> \n";
+
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << "<index>" << -1 << "</index>\n";
+
+      stream << "<contents \n";
+      stream << "coverageCount=\"" << 0 << "\"> \n";
+      stream << "</contents> \n";
+
+      stream << "</crossBin> \n";
+    }
+
     // The bins are written in the order of their indices, the last
     // coverpoint counting fastest, which is also the order of cross_bins.
     std::vector<size_t> indices(sizes.size(), 0);
