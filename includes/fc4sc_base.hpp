@@ -415,6 +415,10 @@ public:
   /*! Number of sample misses (no bin hit)*/
   uint64_t misses = 0;
 
+  /*! Data of the covergroup instance this coverpoint or cross is in,
+   *  or nullptr if it is in none */
+  cvg_base_data_model* parent_cvg = nullptr;
+
   /*! Visitor function for introspection */
   virtual void accept_visitor(covVisitorBase&) = 0;
 
@@ -454,6 +458,21 @@ public:
 
   /*! Get pointer to data model */
   virtual cvp_base_data_model* get_data() = 0;
+
+  /*!
+   * \brief Returns the type coverage of this coverpoint or cross: its
+   * coverage across all the instances of the covergroup type it is in
+   * \returns Double between 0 and 100
+   */
+  virtual double get_coverage() const = 0;
+
+  /*!
+   * \brief Returns the type coverage of this coverpoint or cross
+   * \param covered Number of covered bins, summed over the instances
+   * \param total Total number of bins, summed over the instances
+   * \returns Double between 0 and 100
+   */
+  virtual double get_coverage(int &covered, int &total) const = 0;
 
   /*! Destructor */
   virtual ~cvp_base(){}
@@ -616,6 +635,7 @@ public:
   /*! Add coverpoint/cross data to the covergroup */
   void add_cvp_data(cvp_base_data_model* cvp_data)
   {
+    cvp_data->parent_cvg = this;
     cvps.push_back(cvp_data);
   }
   

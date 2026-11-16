@@ -625,6 +625,33 @@ public:
   }
 
   /*!
+   *  \brief Computes the type coverage of this coverpoint: its coverage
+   *  across all the instances of the covergroup type it is in
+   *  \returns Coverage value as a double between 0 and 100
+   */
+  double get_coverage() const
+  {
+    int covered = 0;
+    int total = 0;
+    return this->get_coverage(covered, total);
+  }
+
+  /*!
+   *  \brief Computes the type coverage of this coverpoint
+   *  \param covered Number of covered bins, summed over the instances
+   *  \param total Total number of bins, summed over the instances
+   *  \returns Coverage value as a double between 0 and 100
+   */
+  double get_coverage(int &covered, int &total) const
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return fc4sc::global::get_cvp_coverage(cvp_data, covered, total);
+  }
+
+  /*!
    *  \brief Retrieves the number of hits of the bin with a particular index.
    *  The index order is the same as in the declaration of the coverpoint.
    *  This function will throw an error if the bin count is out of bounds!
