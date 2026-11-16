@@ -359,6 +359,46 @@ public:
     return cvg_data->name;
   }
 
+  /*!
+   * \brief Sets the name of this instance, which is also the name it is
+   * written with to the coverage database. The name must not be empty or
+   * be in use by another covergroup or scope instance in the same scope.
+   * \param inst_name New name of this instance
+   */
+  void set_inst_name(const std::string &inst_name)
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    std::string old_name = cvg_data->name;
+    if (inst_name == old_name)
+      return;
+    if (inst_name.empty()) {
+      std::cerr << "Error: the name of covergroup " << old_name << " cannot be set to an empty string\n";
+      throw("The name of covergroup " + old_name + " cannot be set to an empty string");
+    }
+
+    scp_base_data_model* scp_data = cvg_data->parent_scp;
+    if (scp_data != nullptr) {
+      if (scp_data->cvg_insts.count(inst_name) > 0 || scp_data->child_scp_insts.count(inst_name) > 0) {
+        std::cerr << "Error: " << inst_name << " scope name already in use\n";
+        throw("Cannot rename covergroup " + old_name + " to " + inst_name + ": the name is already in use");
+      }
+      auto it = scp_data->cvg_insts.find(old_name);
+      if (it != scp_data->cvg_insts.end() && it->second == cvg_data)
+        scp_data->cvg_insts.erase(it);
+      scp_data->cvg_insts[inst_name] = cvg_data;
+    }
+    if (this->parent_scp != nullptr) {
+      auto it = this->parent_scp->cvg_insts.find(old_name);
+      if (it != this->parent_scp->cvg_insts.end() && it->second == this)
+        this->parent_scp->cvg_insts.erase(it);
+      this->parent_scp->cvg_insts[inst_name] = this;
+    }
+    cvg_data->name = inst_name;
+  }
+
   cvg_option& option() const
   {
     if(valid_data.use_count() == 0) {
