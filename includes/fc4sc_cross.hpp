@@ -319,7 +319,8 @@ public:
     if (total == 0)
       return (this->crs_data->option.weight == 0) ? 100 : 0;
 
-    return covered / total;
+    double real = 100.0 * covered / total;
+    return (real >= this->crs_data->option.goal) ? 100 : real;
   }
 
   cvp_base_data_model* get_data()
