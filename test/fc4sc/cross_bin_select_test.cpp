@@ -318,3 +318,37 @@ TEST(cross_bin_select, written_to_ucis_xml) {
   EXPECT_EQ(cross_bin("ign"), "");
   EXPECT_EQ(cross_bin("bad"), "");
 }
+
+class cross_select_late_cvg : public covergroup {
+public:
+  CG_CONS(cross_select_late_cvg) {};
+  int a = 0;
+  int b = 0;
+  COVERPOINT(int, cvp_a, a) { bin<int>("one", 1), ignore_bin<int>("ign", 5) };
+  COVERPOINT(int, cvp_b, b) { bin<int>("x", 0) };
+};
+
+// A cross whose bins are not valid throws, and is not left in its covergroup
+TEST(cross_bin_select, bad_select_not_registered) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    cross_select_late_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    typedef cross<int, int> cross_t;
+    auto named = [&]() {
+      return new cross_t(&cvg, "bad", &cvg.cvp_a, &cvg.cvp_b,
+                         cross_bin("q", binsof<int>(&cvg.cvp_a, "ign")));
+    };
+    auto unnamed = [&]() {
+      return new cross_t(&cvg, &cvg.cvp_a, &cvg.cvp_b,
+                         cross_bin("q", binsof<int>(&cvg.cvp_a, "none")));
+    };
+    EXPECT_THROW(named(), std::invalid_argument);
+    EXPECT_THROW(unnamed(), std::invalid_argument);
+    EXPECT_EQ(cvg.cvps.size(), 2u);
+    EXPECT_EQ(cvg.get_cvg_data()->cvps.size(), 2u);
+    cvg.a = 1;
+    cvg.sample();
+    EXPECT_EQ(cvg.get_inst_coverage(), 100);
+  }
+  fc4sc::global::delete_context(cntxt);
+}

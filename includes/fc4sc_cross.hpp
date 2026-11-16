@@ -199,6 +199,22 @@ class cross : public cross_base
   }
 
   /*!
+   * \brief Calls build_cross_bins() and, if it throws, deletes the data of
+   * the cross, which no covergroup owns yet
+   */
+  void build_cross_bins_or_free()
+  {
+    try {
+      build_cross_bins();
+    }
+    catch (...) {
+      delete crs_data;
+      crs_data = nullptr;
+      throw;
+    }
+  }
+
+  /*!
    * \brief Hits the bins of the products of a sample, for a cross which
    * has user defined bins
    * \param products The products of bins hit by the sample
@@ -348,7 +364,7 @@ class cross : public cross_base
       crs_data->cross_cvps.push_back(cvp_it->get_data());
     }
     add_cross_bins(binsofs...);
-    build_cross_bins();
+    build_cross_bins_or_free();
   };
 
 public:
@@ -366,16 +382,17 @@ public:
   template <typename... Restrictions>
   cross(cvg_base *n, coverpoint<Args> *... args, Restrictions... binsofs)
   {
-    n->cvps.push_back(this);
-    n->get_cvg_data()->add_cvp_data(crs_data);
-
     total_coverpoints = get_size(args...);
     cvps_vec = std::vector<cvp_base*>{args...};
     for(auto cvp_it : cvps_vec) {
       crs_data->cross_cvps.push_back(cvp_it->get_data());
     }
     add_cross_bins(binsofs...);
-    build_cross_bins();
+    build_cross_bins_or_free();
+
+    // registered once it is built: a cross which throws is not sampled
+    n->cvps.push_back(this);
+    n->get_cvg_data()->add_cvp_data(crs_data);
   };
 
   /*!
@@ -388,10 +405,8 @@ public:
    */
   template <typename... Restrictions>
   cross(cvg_base *n, const std::string& name, coverpoint<Args> *... args, Restrictions... binsofs)
-    : cross(n, args...) {
+    : cross(n, args..., binsofs...) {
     this->crs_data->name = name;
-    add_cross_bins(binsofs...);
-    build_cross_bins();
   };
 
 
