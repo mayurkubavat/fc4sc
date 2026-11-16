@@ -15,6 +15,7 @@
    limitations under the License.
 
 ******************************************************************************/
+#include <chrono>
 #include <fstream>
 #include <initializer_list>
 #include <sstream>
@@ -387,4 +388,25 @@ TEST(transition_bin, bool_type) {
     EXPECT_EQ(cvg.cvp.get_bin_hit_count(1), 1u);
   }
   fc4sc::global::delete_context(cntxt);
+}
+
+TEST(transition_bin, expansion_is_bounded) {
+  auto start = std::chrono::steady_clock::now();
+
+  // 8000 sequences of 32 million values in all
+  EXPECT_THROW(trans<int>(fc4sc::repeat(1, 1, 8000)).sequences(), std::invalid_argument);
+  EXPECT_THROW(trans<int>(fc4sc::repeat(1, 2000000)).sequences(), std::invalid_argument);
+  EXPECT_THROW(trans<int>(fc4sc::repeat(1, 1, uint64_t(1) << 40)).sequences(), std::invalid_argument);
+  EXPECT_THROW(trans<int>(fc4sc::repeat(1, uint64_t(1) << 40)).sequences(), std::invalid_argument);
+  EXPECT_THROW(transition_bin<int>("b", trans<int>(fc4sc::repeat(1, 1000000)),
+                                   trans<int>(fc4sc::repeat(2, 1000000))),
+               std::invalid_argument);
+
+  auto sequences = trans<int>(fc4sc::repeat(1, 1000000)).sequences();
+  ASSERT_EQ(sequences.size(), 1u);
+  EXPECT_EQ(sequences[0].size(), 1000000u);
+  EXPECT_EQ(trans<int>(fc4sc::repeat(1, 1, 1400)).sequences().size(), 1400u);
+
+  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  EXPECT_LT(seconds, 2.0);
 }

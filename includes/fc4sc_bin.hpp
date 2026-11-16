@@ -605,6 +605,11 @@ public:
 static const uint64_t trans_max_sequences = 1 << 16;
 
 /*!
+ * \brief Maximum number of values in all the value sequences of a transition
+ */
+static const uint64_t trans_max_values = 1 << 20;
+
+/*!
  * \brief Unsigned type with the bits of T, also for bool
  */
 template <typename T, bool = std::is_same<T, bool>::value>
@@ -734,6 +739,22 @@ class trans
     count *= n;
   }
 
+  /*! Adds n to a number of values and checks that it stays within the limit */
+  static void add_values(uint64_t& count, uint64_t n)
+  {
+    if (n > trans_max_values || count + n > trans_max_values)
+      throw std::invalid_argument("Transition expands to too many values");
+    count += n;
+  }
+
+  /*! Multiplies a number of values by n and checks that it stays within the limit */
+  static void mul_values(uint64_t& count, uint64_t n)
+  {
+    if (n != 0 && count > trans_max_values / n)
+      throw std::invalid_argument("Transition expands to too many values");
+    count *= n;
+  }
+
   typedef typename trans_unsigned<T>::type U;
 
   /*! Number of values in a step */
@@ -767,60 +788,93 @@ public:
 
   /*!
    *  \brief Returns all the value sequences which match this transition
+   *
+   *  Throws std::invalid_argument if there are more than trans_max_sequences
+   *  sequences, or more than trans_max_values values in all of them.
    */
   std::vector<std::vector<T>> sequences() const
   {
-    // the step lists of all the repetition counts
-    std::vector<std::vector<const std::vector<interval_t<T>>*>> lists(1);
+    // count the sequences and their values before building them
     uint64_t count = 1;
+    uint64_t length = 0;
+    std::vector<std::vector<T>> step_values;
     for (auto &step : steps)
     {
-      mul_count(count, step.max - step.min + 1);
-      std::vector<std::vector<const std::vector<interval_t<T>>*>> new_lists;
+      const uint64_t values = values_count(step.values);
+      if (step.min > trans_max_values)
+        throw std::invalid_argument("Transition expands to too many values");
+
+      // sequences of the step: sum of values^n, and their values: sum of n*values^n
+      uint64_t power = 1;
+      for (uint64_t n = 1; n < step.min; ++n)
+        mul_count(power, values);
+      uint64_t step_count = 0;
+      uint64_t step_length = 0;
+      for (uint64_t n = step.min; n <= step.max; ++n)
+      {
+        mul_count(power, values);
+        add_count(step_count, power);
+        add_values(step_length, n * power);
+      }
+
+      uint64_t new_length = length;
+      mul_values(new_length, step_count);
+      uint64_t step_part = count;
+      mul_values(step_part, step_length);
+      add_values(new_length, step_part);
+      mul_count(count, step_count);
+      length = new_length;
+
+      step_values.push_back(std::vector<T>());
+      for (auto &intv : step.values)
+      {
+        const U last = static_cast<U>(static_cast<U>(intv.second) - static_cast<U>(intv.first));
+        for (uint64_t k = 0; k <= last; ++k)
+          step_values.back().push_back(static_cast<T>(static_cast<U>(static_cast<U>(intv.first) + k)));
+      }
+    }
+
+    // the step lists of all the repetition counts
+    std::vector<std::vector<const std::vector<T>*>> lists(1);
+    for (size_t s = 0; s < steps.size(); ++s)
+    {
+      std::vector<std::vector<const std::vector<T>*>> new_lists;
       for (auto &list : lists)
       {
-        for (uint64_t n = step.min; n <= step.max; ++n)
+        for (uint64_t n = steps[s].min; n <= steps[s].max; ++n)
         {
           new_lists.push_back(list);
-          new_lists.back().insert(new_lists.back().end(), n, &step.values);
+          new_lists.back().insert(new_lists.back().end(), n, &step_values[s]);
         }
       }
       lists.swap(new_lists);
     }
 
     // all the value combinations of each step list
-    uint64_t total = 0;
-    for (auto &list : lists)
-    {
-      uint64_t list_count = 1;
-      for (auto set : list)
-        mul_count(list_count, values_count(*set));
-      add_count(total, list_count);
-    }
-
     std::vector<std::vector<T>> result;
-    result.reserve(total);
+    result.reserve(count);
     for (auto &list : lists)
     {
-      std::vector<std::vector<T>> partial(1);
-      for (auto set : list)
+      std::vector<size_t> index(list.size(), 0);
+      std::vector<T> seq(list.size());
+      for (size_t i = 0; i < list.size(); ++i)
+        seq[i] = (*list[i])[0];
+      bool more = true;
+      while (more)
       {
-        std::vector<std::vector<T>> next;
-        for (auto &seq : partial)
+        result.push_back(seq);
+        // next combination, the last step changes first
+        more = false;
+        for (size_t i = list.size(); i > 0 && !more; --i)
         {
-          for (auto &intv : *set)
-          {
-            const U length = static_cast<U>(static_cast<U>(intv.second) - static_cast<U>(intv.first));
-            for (uint64_t k = 0; k <= length; ++k)
-            {
-              next.push_back(seq);
-              next.back().push_back(static_cast<T>(static_cast<U>(static_cast<U>(intv.first) + k)));
-            }
-          }
+          const size_t p = i - 1;
+          if (++index[p] == list[p]->size())
+            index[p] = 0;
+          else
+            more = true;
+          seq[p] = (*list[p])[index[p]];
         }
-        partial.swap(next);
       }
-      result.insert(result.end(), partial.begin(), partial.end());
     }
     return result;
   }
@@ -907,10 +961,16 @@ protected:
   template <typename... Args>
   void add_trans(const trans<T>& tr, Args... args)
   {
+    uint64_t values = 0;
+    for (auto &seq : trans_data()->sequences)
+      values += seq.size();
     for (auto &seq : tr.sequences())
     {
       if (trans_data()->sequences.size() >= trans_max_sequences)
         throw std::invalid_argument("Transition bin \"" + this->bin_data->name + "\" has too many value sequences");
+      values += seq.size();
+      if (values > trans_max_values)
+        throw std::invalid_argument("Transition bin \"" + this->bin_data->name + "\" has too many values");
       trans_data()->sequences.push_back(seq);
       trans_data()->interval_hits.push_back(0);
     }
