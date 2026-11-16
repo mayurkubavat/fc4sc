@@ -316,3 +316,46 @@ TEST(transition_bin, declared_before_value_bins) {
   }
   fc4sc::global::delete_context(cntxt);
 }
+
+class transition_ignore_value_cvg : public covergroup {
+public:
+  CG_CONS(transition_ignore_value_cvg) {};
+
+  int x = 0;
+
+  void sample(std::initializer_list<int> values) {
+    for (int v : values) {
+      this->x = v;
+      covergroup::sample();
+    }
+  }
+
+  // ignore_bins ign = {2,3};
+  // bins t12 = (1 => 2); bins t134 = (1 => 3 => 4); bins t14 = (1 => 4);
+  COVERPOINT(int, cvp, x) {
+    ignore_bin<int>("ign", 2, 3),
+    transition_bin<int>("t12", trans<int>(1, 2)),
+    transition_bin<int>("t134", trans<int>(1, 3, 4)),
+    transition_bin<int>("t14", trans<int>(1, 4))
+  };
+};
+
+TEST(transition_bin, ignored_values) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    transition_ignore_value_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    // a transition which ends on an ignored value is not hit, and the
+    // sample is a miss only
+    cvg.sample({1, 2});
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(0), 0u);
+    EXPECT_EQ(cvg.cvp.get_misses(), 2u);
+    // nor is a transition with an ignored value in it
+    cvg.sample({1, 3, 4});
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(1), 0u);
+    EXPECT_EQ(cvg.cvp.get_misses(), 5u);
+    cvg.sample({1, 4});
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(2), 1u);
+    EXPECT_EQ(cvg.cvp.get_misses(), 6u);
+  }
+  fc4sc::global::delete_context(cntxt);
+}

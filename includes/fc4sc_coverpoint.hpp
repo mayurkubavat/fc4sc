@@ -224,6 +224,9 @@ private:
   /*! The last sampled values, as many as trans_depth */
   std::deque<T> trans_history;
 
+  /*! Number of the last sampled values which are not ignored values */
+  size_t trans_clean = 0;
+
   /*! Sampling switch */
   bool collect = true;
 
@@ -365,28 +368,32 @@ private:
   /*!
    *  \brief Samples the transition bins
    *  \param cvp_val Value to be sampled for this coverpoint
+   *  \param ignored Whether the value is in an ignore bin
    *
    *  Adds the value to the sample history and hits the transition bins
-   *  whose transitions end with this sample
+   *  whose transitions end with this sample. A transition which has an
+   *  ignored value in it is not hit.
    */
-  void sample_transitions(const T &cvp_val)
+  void sample_transitions(const T &cvp_val, bool ignored)
   {
     if (trans_depth == 0) return;
 
     trans_history.push_back(cvp_val);
     if (trans_history.size() > trans_depth)
       trans_history.pop_front();
+    trans_clean = ignored ? 0 : std::min(trans_clean + 1, trans_depth);
+    if (ignored) return;
 
     for (auto index : this->trans_ignore_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data);
-      if (data->sample(trans_history) >= 0) return;
+      if (data->sample(trans_history, trans_clean) >= 0) return;
     }
 
     for (auto index : this->trans_illegal_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->illegal_bins[index].bin_data);
-      int seq = data->sample(trans_history);
+      int seq = data->sample(trans_history, trans_clean);
       if (seq >= 0) {
         std::stringstream ss;
         for (size_t i = 0; i < data->sequences[seq].size(); ++i)
@@ -401,7 +408,7 @@ private:
     for (auto index : this->trans_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->bins[index].bin_data);
-      if (data->sample(trans_history) >= 0) {
+      if (data->sample(trans_history, trans_clean) >= 0) {
         this->last_bin_index_hit = index;
         this->last_sample_success = true;
       }
@@ -421,22 +428,28 @@ private:
     if (!collect) return;
     this->last_sample_success = false;
 
-    // 0) Sample the transition bins
-    sample_transitions(cvp_val);
-
     // 1) Search if the value is in the ignore bins
+    bool ignored = false;
     auto range_it  = get_interval_bs(this->ignore_interval_map,cvp_val);
     if(range_it != this->ignore_interval_map.end()) {
       for(auto bin_range_it : range_it->second)
       {
         if (this->ignore_bins[bin_range_it.first].sample(cvp_val,bin_range_it.second)) {
-          cvp_data->misses++;
-          return;
+          ignored = true;
+          break;
         }
       }
     }
 
-    // 2) Search if the value is in the illegal bins
+    // 2) Sample the transition bins
+    sample_transitions(cvp_val, ignored);
+
+    if (ignored) {
+      cvp_data->misses++;
+      return;
+    }
+
+    // 3) Search if the value is in the illegal bins
     range_it  = get_interval_bs(this->illegal_interval_map,cvp_val);
     if(range_it != this->illegal_interval_map.end()) {
       for(auto bin_range_it : range_it->second)
@@ -449,7 +462,7 @@ private:
       }
     }
 
-    // 3) Sample regular bins    
+    // 4) Sample regular bins    
     range_it  = get_interval_bs(this->regular_interval_map,cvp_val);
     if(range_it != this->regular_interval_map.end()) {
       for(auto bin_range_it : range_it->second)
@@ -562,6 +575,7 @@ public:
     this->trans_ignore_bins = std::move(rh.trans_ignore_bins);
     this->trans_depth = rh.trans_depth;
     this->trans_history.clear();
+    this->trans_clean = 0;
 
     this->cvp_data->bins_data = rh.cvp_data->bins_data;
     this->cvp_data->illegal_bins_data = rh.cvp_data->illegal_bins_data;

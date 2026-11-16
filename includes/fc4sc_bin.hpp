@@ -845,14 +845,15 @@ public:
    * \brief Checks if the last sampled values end with one of the sequences
    * of this bin. Increments the hit count of the first such sequence.
    * \param history The last sampled values, the oldest first
+   * \param max_length Length of the longest sequence which may be hit
    * \returns Index of the sequence which was hit, or -1
    */
-  int sample(const std::deque<T>& history)
+  int sample(const std::deque<T>& history, size_t max_length)
   {
     for (size_t i = 0; i < sequences.size(); ++i)
     {
       const std::vector<T>& seq = sequences[i];
-      if (seq.size() > history.size()) continue;
+      if (seq.size() > history.size() || seq.size() > max_length) continue;
       if (std::equal(seq.rbegin(), seq.rend(), history.rbegin())) {
         this->interval_hits[i]++;
         return static_cast<int>(i);
@@ -870,7 +871,8 @@ public:
  * coverpoint match one of its transitions. The SystemVerilog
  * "bins b = (1 => 2 => 3), (5 => 6);" is written
  * transition_bin<int>("b", trans<int>(1, 2, 3), trans<int>(5, 6)).
- * The bin is hit at most once per sample.
+ * The bin is hit at most once per sample, and a transition which has a value
+ * of an ignore bin in it is not hit.
  */
 template <class T>
 class transition_bin : public bin<T>
