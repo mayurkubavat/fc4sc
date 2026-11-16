@@ -1228,8 +1228,8 @@ public:
  *
  *   If a sample hits a value bin and transition bins of the same
  * coverpoint, a cross of the coverpoint counts each of them, as for bins
- * with overlapping values. Transition bins cannot be created in the
- * coverpoints of a dynamic covergroup.
+ * with overlapping values. In a dynamic covergroup, transition bins are
+ * created with create_transition_bin() of the coverpoint factory.
  */
 template <class T>
 class transition_bin : public bin<T>
