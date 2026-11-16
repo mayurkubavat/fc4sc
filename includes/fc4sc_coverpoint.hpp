@@ -592,6 +592,25 @@ private:
     this->cvp_data->name = cvp_name;
   }
 
+  /*! Indices of the elements of a tuple */
+  template <size_t... I> struct index_list {};
+
+  /*! The indices of a tuple of N elements from the last to the first */
+  template <size_t N, size_t... I>
+  struct reversed_indices : reversed_indices<N - 1, I..., N - 1> {};
+  template <size_t... I>
+  struct reversed_indices<0, I...> { typedef index_list<I...> type; };
+
+  /*!
+   *  \brief Constructor that passes the elements of a tuple, in the order of
+   *  the given indices, to the constructors above. Each of them registers its
+   *  bin after the constructor it delegates to has registered the bins of the
+   *  arguments behind it, so the bins are registered from the last argument
+   *  to the first.
+   */
+  template <typename Tuple, size_t... I>
+  coverpoint(Tuple args, index_list<I...>) : coverpoint(std::get<I>(args)...) { }
+
 public:
 
   // Initialization constructor. Needed for the use of COVERGROUP macro;
@@ -642,11 +661,11 @@ public:
   }
 
   template <typename... Args>
-  coverpoint(cvg_base *parent_cvg, Args... args) : coverpoint(args...) {
+  coverpoint(cvg_base *parent_cvg, Args... args) :
+    coverpoint(std::make_tuple(args...), typename reversed_indices<sizeof...(Args)>::type()) {
     static_assert(forbid_type<cvg_base *, Args...>::value, "Coverpoint constructor accepts only 1 parent covergroup pointer!");
-    // Because the way that delegated constructors work, the coverpoint arguments
-    // processed in the reverse order, resulting in a reversed vector of bins.
-    //std::reverse(bins.begin(), bins.end());
+    // The delegated constructors register the bins in reverse order, so they
+    // are given the arguments reversed: the bins keep the order of declaration.
     parent_cvg->register_cvp(this);
 
     // set strings here
