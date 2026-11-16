@@ -482,6 +482,19 @@ public:
       stream << "</range>\n\n";
     }
 
+    // Print each sequence of a transition bin
+    auto bin_sequences = base.get_sequences_to_int();
+    for (size_t i = 0; i < bin_sequences.size(); ++i)
+    {
+      stream << "<sequence>\n";
+      stream << "<contents "
+             << "coverageCount=\"" << interval_hits[i] << "\">";
+      stream << "</contents>\n";
+      for (auto value : bin_sequences[i])
+        stream << "<seqValue>" << value << "</seqValue>\n";
+      stream << "</sequence>\n\n";
+    }
+
     stream << "</coverpointBin>\n";
 
   }

@@ -36,6 +36,7 @@
 
 #include <type_traits>
 #include <list>
+#include <deque>
 #include <unordered_map>
 #include <functional>
 #include <tuple>
@@ -121,6 +122,7 @@ private:
   friend class bin_array<T>;
   friend class ignore_bin<T>;
   friend class illegal_bin<T>;
+  friend class transition_bin<T>;
 
   template<typename U, typename V>
   friend class dynamic_coverpoint_factory;
@@ -208,6 +210,19 @@ private:
   std::vector<illegal_bin<T>> illegal_bins;
   /*! Ignore bins contained in this coverpoint */
   std::vector<ignore_bin<T>> ignore_bins;
+
+  /*! Indices of the transition bins in bins */
+  std::vector<size_t> trans_bins;
+  /*! Indices of the transition bins in illegal_bins */
+  std::vector<size_t> trans_illegal_bins;
+  /*! Indices of the transition bins in ignore_bins */
+  std::vector<size_t> trans_ignore_bins;
+
+  /*! Length of the longest sequence of the transition bins */
+  size_t trans_depth = 0;
+
+  /*! The last sampled values, as many as trans_depth */
+  std::deque<T> trans_history;
 
   /*! Sampling switch */
   bool collect = true;
@@ -348,6 +363,52 @@ private:
   interval_map_t ignore_interval_map;
  
   /*!
+   *  \brief Samples the transition bins
+   *  \param cvp_val Value to be sampled for this coverpoint
+   *
+   *  Adds the value to the sample history and hits the transition bins
+   *  whose transitions end with this sample
+   */
+  void sample_transitions(const T &cvp_val)
+  {
+    if (trans_depth == 0) return;
+
+    trans_history.push_back(cvp_val);
+    if (trans_history.size() > trans_depth)
+      trans_history.pop_front();
+
+    for (auto index : this->trans_ignore_bins)
+    {
+      auto data = static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data);
+      if (data->sample(trans_history) >= 0) return;
+    }
+
+    for (auto index : this->trans_illegal_bins)
+    {
+      auto data = static_cast<transition_bin_data_model<T>*>(this->illegal_bins[index].bin_data);
+      int seq = data->sample(trans_history);
+      if (seq >= 0) {
+        std::stringstream ss;
+        for (size_t i = 0; i < data->sequences[seq].size(); ++i)
+          ss << ((i == 0) ? "" : " => ") << data->sequences[seq][i];
+        illegal_bin_sample_exception e;
+        e.update_bin_info(data->name, ss.str());
+        e.update_cvp_info(this->cvp_data->name);
+        throw e;
+      }
+    }
+
+    for (auto index : this->trans_bins)
+    {
+      auto data = static_cast<transition_bin_data_model<T>*>(this->bins[index].bin_data);
+      if (data->sample(trans_history) >= 0) {
+        this->last_bin_index_hit = index;
+        this->last_sample_success = true;
+      }
+    }
+  }
+
+  /*!
    *  \brief Sampling function at coverpoint level
    *  \param cvp_val Value to be sampled for this coverpoint
    *
@@ -359,6 +420,9 @@ private:
 #endif
     if (!collect) return;
     this->last_sample_success = false;
+
+    // 0) Sample the transition bins
+    sample_transitions(cvp_val);
 
     // 1) Search if the value is in the ignore bins
     auto range_it  = get_interval_bs(this->ignore_interval_map,cvp_val);
@@ -416,6 +480,15 @@ private:
       //bins.push_back(n);
       n.add_to_cvp(*this);
     }
+  }
+
+  /*!
+   *  \brief Constructor that registers a transition bin
+   */
+  template <typename... Args>
+  coverpoint(transition_bin<T> n, Args... args) : coverpoint(args...)
+  {
+    n.add_to_cvp(*this);
   }
 
   /*!
@@ -484,6 +557,11 @@ public:
     this->regular_interval_map = std::move(rh.regular_interval_map);
     this->illegal_interval_map = std::move(rh.illegal_interval_map);
     this->ignore_interval_map = std::move(rh.ignore_interval_map);
+    this->trans_bins = std::move(rh.trans_bins);
+    this->trans_illegal_bins = std::move(rh.trans_illegal_bins);
+    this->trans_ignore_bins = std::move(rh.trans_ignore_bins);
+    this->trans_depth = rh.trans_depth;
+    this->trans_history.clear();
 
     this->cvp_data->bins_data = rh.cvp_data->bins_data;
     this->cvp_data->illegal_bins_data = rh.cvp_data->illegal_bins_data;

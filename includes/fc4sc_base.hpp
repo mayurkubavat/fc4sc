@@ -287,6 +287,16 @@ public:
   /*! Get intervals in type int */
   virtual std::vector<interval_t<int>> get_intervals_to_int() const = 0;
 
+  /*!
+   * Get the value sequences of a transition bin in type int. The hit
+   * counts in get_interval_hits() belong to these sequences, and a bin has
+   * either intervals or sequences.
+   */
+  virtual std::vector<std::vector<int>> get_sequences_to_int() const
+  {
+    return std::vector<std::vector<int>>();
+  }
+
   /*! Get name of bin */
   virtual std::string& get_name() = 0;
 
