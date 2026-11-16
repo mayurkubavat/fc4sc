@@ -314,11 +314,12 @@ public:
     /*!
      * \brief Computes the coverage percentage across all instances of a given type
      * \param type Unmangled type name
-     * \param hit_bins Total number of hit bins in instances
-     * \param total_bins Total number of bins in instances
+     * \param hit_bins Total number of hit bins in instances (in the merged
+     * instances if type_option.merge_instances is set)
+     * \param total_bins Total number of bins in instances (in the merged
+     * instances if type_option.merge_instances is set)
      * \returns Double between 0 and 100
      */
-    // TODO merge hit_bins
     double internal_get_coverage(const std::string &scp_type, const std::string &type, int &hit_bins, int &total_bins)
     {
       general_coverage data_visitor;
@@ -345,6 +346,205 @@ public:
   //};
 
 private:
+
+/*!
+ * \class merged_coverage fc_master.hpp
+ * \brief Computes the coverage of a covergroup type with merged instances
+ *
+ * Used when type_option.merge_instances is set. The bins of all enabled
+ * instances are merged: bins with the same name in a coverpoint are the
+ * same bin, their hits are added up, and the type coverage is computed on
+ * the merged bins as if they were the bins of a single instance. Cross bins
+ * are merged in the same way, by the names of the bins they are made of.
+ * The at_least, goal and weight options of a merged coverpoint or cross are
+ * those of the first enabled instance which has it.
+ */
+class merged_coverage : public covVisitorBase
+{
+  /*! Key of a bin: its name and its occurrence among the bins of that name */
+  typedef std::pair<std::string, size_t> bin_key_t;
+
+  /*! Merged data of a coverpoint or a cross */
+  struct merged_cvp
+  {
+    bool is_cross = false;
+    uint64_t weight = 1;
+    uint64_t goal = 100;
+    uint64_t at_least = 1;
+
+    /*! Coverpoint: hits of each merged bin */
+    std::map<bin_key_t, uint64_t> bin_hits;
+
+    /*! Cross: bins of each crossed coverpoint */
+    std::vector<std::map<bin_key_t, bool>> cross_dims;
+
+    /*! Cross: hits of each merged cross bin */
+    std::map<std::vector<bin_key_t>, uint64_t> cross_hits;
+  };
+
+  /*! Merged coverpoints and crosses, in the order they are first seen */
+  std::vector<std::string> cvp_order;
+  std::map<std::string, merged_cvp> cvps;
+
+  /*! Returns the keys of the bins of a coverpoint, in the order of its bins */
+  static std::vector<bin_key_t> bin_keys(const cvp_base_data_model* cvp)
+  {
+    std::vector<bin_key_t> keys;
+    auto data = dynamic_cast<const coverpoint_base_data_model*>(cvp);
+    if (data == nullptr) {
+      // not a coverpoint: the index of the bin is the only thing known
+      for (uint64_t i = 0; i < cvp->size(); ++i)
+        keys.push_back(bin_key_t(std::to_string(i), 0));
+      return keys;
+    }
+    std::map<std::string, size_t> seen;
+    for (auto bin : data->bins_data)
+    {
+      const std::string& name = bin->get_name();
+      keys.push_back(bin_key_t(name, seen[name]++));
+    }
+    return keys;
+  }
+
+  merged_cvp& get_merged(const std::string& name, bool is_cross)
+  {
+    if (cvps.count(name) == 0) {
+      cvp_order.push_back(name);
+      cvps[name].is_cross = is_cross;
+    }
+    return cvps[name];
+  }
+
+public:
+
+  int bin_total = 0;
+  int bin_covered = 0;
+
+  void visit(scp_base_data_model&) { }
+
+  void visit(cvg_base_data_model& base)
+  {
+    if (!base.enable) return;
+    for (auto &cvp : base.cvps)
+      cvp->accept_visitor(*this);
+  }
+
+  void visit(coverpoint_base_data_model& base)
+  {
+    bool first = (cvps.count(base.name) == 0);
+    merged_cvp& merged = get_merged(base.name, false);
+    if (first) {
+      merged.weight = base.option.weight;
+      merged.goal = base.option.goal;
+      merged.at_least = base.option.at_least;
+    }
+
+    std::vector<bin_key_t> keys = bin_keys(&base);
+    for (size_t i = 0; i < keys.size(); ++i)
+    {
+      uint64_t hits = 0;
+      for (auto hitcount : base.bins_data[i]->get_interval_hits())
+        hits += hitcount;
+      merged.bin_hits[keys[i]] += hits;
+    }
+  }
+
+  void visit(cross_base_data_model& base)
+  {
+    bool first = (cvps.count(base.name) == 0);
+    merged_cvp& merged = get_merged(base.name, true);
+    if (first) {
+      merged.weight = base.option.weight;
+      merged.goal = base.option.goal;
+      merged.at_least = base.option.at_least;
+    }
+
+    std::vector<std::vector<bin_key_t>> keys;
+    for (auto cvp : base.cross_cvps)
+      keys.push_back(bin_keys(cvp));
+
+    if (merged.cross_dims.size() < keys.size())
+      merged.cross_dims.resize(keys.size());
+    for (size_t dim = 0; dim < keys.size(); ++dim)
+      for (auto &key : keys[dim])
+        merged.cross_dims[dim][key] = true;
+
+    for (auto &bin : base.get_cross_bins())
+    {
+      std::vector<bin_key_t> cross_key;
+      for (size_t dim = 0; dim < bin.first.size() && dim < keys.size(); ++dim)
+        cross_key.push_back(keys[dim].at(bin.first[dim]));
+      merged.cross_hits[cross_key] += bin.second;
+    }
+  }
+
+  void visit(bin_base_data_model&) { }
+
+  /*!
+   * \brief Computes the merged coverage of all instances of a covergroup type
+   * \param type_data The covergroup type
+   * \returns Double between 0 and 100
+   */
+  double get_coverage(cvg_metadata& type_data)
+  {
+    bool enabled = false;
+    for (auto cvg : type_data.cvg_insts) {
+      enabled = enabled || cvg->enable;
+      cvg->accept_visitor(*this);
+    }
+
+    // same results as the weighted average for a type without (enabled) instances
+    if (type_data.cvg_insts.empty())
+      return (type_data.type_option.weight == 0) ? 100 : 0;
+    if (!enabled)
+      return 100;
+
+    double res = 0;
+    double weights = 0;
+
+    for (auto &name : cvp_order)
+    {
+      merged_cvp& merged = cvps[name];
+      int covered = 0;
+      int total = 0;
+
+      if (merged.is_cross) {
+        total = merged.cross_dims.empty() ? 0 : 1;
+        for (auto &dim : merged.cross_dims)
+          total *= dim.size();
+        for (auto &bin : merged.cross_hits)
+          covered += (bin.second >= merged.at_least);
+      }
+      else {
+        total = merged.bin_hits.size();
+        for (auto &bin : merged.bin_hits)
+          covered += (bin.second >= merged.at_least);
+      }
+
+      this->bin_total += total;
+      this->bin_covered += covered;
+
+      double cvp_res;
+      if (total == 0) {
+        cvp_res = (merged.weight == 0) ? 100 : 0;
+      }
+      else {
+        double real = 100.0 * covered / total;
+        cvp_res = (real >= merged.goal) ? 100 : real;
+      }
+
+      res += cvp_res * merged.weight;
+      weights += merged.weight;
+    }
+
+    if (weights == 0 || cvp_order.empty() || res == 0)
+      return (type_data.type_option.weight == 0) ? 100 : 0;
+
+    double real = res / weights;
+    return (real >= type_data.type_option.goal) ? 100 : real;
+  }
+
+};
 
 class general_coverage  : public covVisitorBase
 {
@@ -454,7 +654,16 @@ public:
     this->bin_total = 0;
     this->bin_covered = 0;
 
-    std::vector<cvg_base_data_model*> cvgs = fc4sc::global::get_scopes_data(cvg_cntxt)[scp_type]->cvg_type_table[type]->cvg_insts;
+    cvg_metadata* type_data = fc4sc::global::get_scopes_data(cvg_cntxt)[scp_type]->cvg_type_table[type];
+    if (type_data->type_option.merge_instances) {
+      merged_coverage merged;
+      double ret = merged.get_coverage(*type_data);
+      this->bin_total = merged.bin_total;
+      this->bin_covered = merged.bin_covered;
+      return ret;
+    }
+
+    std::vector<cvg_base_data_model*> cvgs = type_data->cvg_insts;
 
     double res = 0;
     double weights = 0;

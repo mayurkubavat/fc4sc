@@ -304,6 +304,12 @@ public:
     else {
       stream << "per_instance=\"false\" ";
     }
+    if(base.type_data->type_option.merge_instances) {
+      stream << "merge_instances=\"true\" ";
+    }
+    else {
+      stream << "merge_instances=\"false\" ";
+    }
     stream << "/>\n";
 
     stream << "<cgId cgName=\"" << escape_xml_chars(base.type_data->type_name) << "\" ";
