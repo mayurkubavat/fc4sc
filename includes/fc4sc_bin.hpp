@@ -79,11 +79,12 @@ static const uint64_t wildcard_max_size = 1 << 16;
  *  \brief Parses a wildcard pattern into the bits to match and their values
  *  \param pattern The pattern, see \link fc4sc::wildcard \endlink
  *  \param width Number of bits of the coverpoint type
+ *  \param type_signed Whether the coverpoint type is signed
  *  \param value Returns the values of the bits to match
  *  \param care Returns a mask of the bits to match
  */
 inline void parse_wildcard(const std::string& pattern, unsigned int width,
-                           uint64_t& value, uint64_t& care)
+                           bool type_signed, uint64_t& value, uint64_t& care)
 {
   const std::string error = "Invalid wildcard pattern \"" + pattern + "\": ";
   std::string digits = pattern;
@@ -169,8 +170,9 @@ inline void parse_wildcard(const std::string& pattern, unsigned int width,
       // an unsized literal whose leftmost bit is x is extended with x
       bits.resize(width, 2);
     }
-    else if (is_signed && size > 0) {
-      // a sized signed literal is sign extended
+    else if (is_signed && type_signed && size > 0) {
+      // a sized signed literal is sign extended to a signed type; with an
+      // unsigned type, the comparison is unsigned and it is zero extended
       bits.resize(width, bits.back());
     }
   }
@@ -201,7 +203,7 @@ inline void parse_wildcard(const std::string& pattern, unsigned int width,
  *  optional size, as in "4'b1??0" or "'h3?", where an x digit is a don't care
  *  digit. As for SystemVerilog literals, an unsized literal whose leftmost
  *  digit is x is extended with don't care bits, and a sized signed literal
- *  ('sb, 'so or 'sh) is sign extended to the type. Other bits above the
+ *  ('sb, 'so or 'sh) is sign extended to a signed type. Other bits above the
  *  pattern are zero. Bits of the pattern above the type must be zero or
  *  don't care.
  *  \returns The matching values, as sorted and disjoint intervals
@@ -219,7 +221,7 @@ std::vector<interval_t<T>> wildcard(const std::string& pattern)
   const unsigned int width = std::numeric_limits<U>::digits;
 
   uint64_t value, care;
-  parse_wildcard(pattern, width, value, care);
+  parse_wildcard(pattern, width, std::is_signed<T>::value, value, care);
 
   // the don't care bits at the bottom make one block of consecutive values,
   // all combinations of the other don't care bits give the blocks to match

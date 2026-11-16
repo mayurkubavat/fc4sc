@@ -174,9 +174,13 @@ TEST(wildcard_bin, literal_extension) {
 }
 
 TEST(wildcard_bin, signed_literals) {
-  // a signed literal is sign extended to the type
+  // a signed literal is sign extended to a signed type
   EXPECT_EQ(wildcard<int8_t>("4'sb1???"), (s8_intervals{{-8, -1}}));
-  EXPECT_EQ(wildcard<uint8_t>("4'sb1???"), (u8_intervals{{248, 255}}));
+  // but not to an unsigned type, as the comparison is unsigned then
+  EXPECT_EQ(wildcard<uint8_t>("4'sb1???"), (u8_intervals{{8, 15}}));
+  EXPECT_EQ(wildcard<uint8_t>("4'sb1000"), (u8_intervals{{8, 8}}));
+  EXPECT_EQ(wildcard<uint8_t>("4'sb?000"), (u8_intervals{{0, 0}, {8, 8}}));
+  EXPECT_EQ(wildcard<int16_t>("4'sb1000"), (std::vector<fc4sc::interval_t<int16_t>>{{-8, -8}}));
   EXPECT_EQ(wildcard<int8_t>("4'Sb0???"), (s8_intervals{{0, 7}}));
   EXPECT_EQ(wildcard<int8_t>("'sh1?"), (s8_intervals{{16, 31}}));
   s8_intervals multiples_of_8 = wildcard<int8_t>("4'sb?000");
