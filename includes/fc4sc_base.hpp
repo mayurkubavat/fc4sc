@@ -451,6 +451,14 @@ public:
   size_t last_bin_index_hit = 0;
   bool last_sample_success = false;
 
+  /*!
+   * Indices of all the bins hit by the last sample, in increasing order.
+   * A sample can hit several bins of a coverpoint: bins with overlapping
+   * values, or a value bin and transition bins. A cross counts every
+   * combination of them.
+   */
+  std::vector<size_t> last_bins_hit;
+
   virtual cvp_base* create_instance(cvg_base* cvg_inst) = 0;
 
   /*! Instance specific options */
