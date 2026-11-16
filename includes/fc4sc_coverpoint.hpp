@@ -368,11 +368,11 @@ private:
   /*!
    *  \brief Samples the transition bins
    *  \param cvp_val Value to be sampled for this coverpoint
-   *  \param ignored Whether the value is in an ignore bin
+   *  \param ignored Whether the value is in an ignore or illegal bin
    *
    *  Adds the value to the sample history and hits the transition bins
    *  whose transitions end with this sample. A transition which has an
-   *  ignored value in it is not hit.
+   *  ignored or illegal value in it is not hit.
    */
   void sample_transitions(const T &cvp_val, bool ignored)
   {
@@ -443,25 +443,29 @@ private:
       }
     }
 
-    // 2) Sample the transition bins
+    // 2) Search if the value is in the illegal bins
+    if (!ignored) {
+      range_it  = get_interval_bs(this->illegal_interval_map,cvp_val);
+      if(range_it != this->illegal_interval_map.end()) {
+        for(auto bin_range_it : range_it->second)
+        {
+          try { this->illegal_bins[bin_range_it.first].sample(cvp_val,bin_range_it.second); }
+          catch (illegal_bin_sample_exception &e) {
+            // no transition with an illegal value in it is hit either
+            sample_transitions(cvp_val, true);
+            e.update_cvp_info(this->cvp_data->name);
+            throw e;
+          }
+        }
+      }
+    }
+
+    // 3) Sample the transition bins
     sample_transitions(cvp_val, ignored);
 
     if (ignored) {
       cvp_data->misses++;
       return;
-    }
-
-    // 3) Search if the value is in the illegal bins
-    range_it  = get_interval_bs(this->illegal_interval_map,cvp_val);
-    if(range_it != this->illegal_interval_map.end()) {
-      for(auto bin_range_it : range_it->second)
-      {
-        try { this->illegal_bins[bin_range_it.first].sample(cvp_val,bin_range_it.second); }
-        catch (illegal_bin_sample_exception &e) {
-          e.update_cvp_info(this->cvp_data->name);
-          throw e;
-        }
-      }
     }
 
     // 4) Sample regular bins    

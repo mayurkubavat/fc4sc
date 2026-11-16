@@ -983,7 +983,7 @@ public:
  * transition_bin<int>("b", trans<int>(1, 2, 3), trans<int>(5, 6)).
  * The bin is hit at most once per sample: if several of its sequences end
  * with a sample, the shortest one is counted. A transition which has a
- * value of an ignore bin in it is not hit.
+ * value of an ignore or illegal bin in it is not hit.
  *
  *   A cross sees one bin of each coverpoint per sample. If a sample hits
  * a value bin and a transition bin of the same coverpoint, the cross takes

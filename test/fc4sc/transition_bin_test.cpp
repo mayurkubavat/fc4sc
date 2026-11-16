@@ -528,3 +528,41 @@ TEST(transition_bin, ignored_transitions) {
   }
   fc4sc::global::delete_context(cntxt);
 }
+
+class transition_illegal_value_cvg : public covergroup {
+public:
+  CG_CONS(transition_illegal_value_cvg) {};
+
+  int x = 0;
+
+  // illegal_bins bad = {9}; bins t19 = (1 => 9); bins t92 = (9 => 2);
+  // bins t12 = (1 => 2);
+  COVERPOINT(int, cvp, x) {
+    illegal_bin<int>("bad", 9),
+    transition_bin<int>("t19", trans<int>(1, 9)),
+    transition_bin<int>("t92", trans<int>(9, 2)),
+    transition_bin<int>("t12", trans<int>(1, 2))
+  };
+};
+
+TEST(transition_bin, illegal_values) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    transition_illegal_value_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    cvg.x = 1;
+    cvg.sample();
+    cvg.x = 9;
+    EXPECT_THROW(cvg.sample(), fc4sc::illegal_bin_sample_exception);
+    cvg.x = 2;
+    cvg.sample();
+    // no transition with the illegal value in it is hit
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(0), 0u);
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(1), 0u);
+    cvg.x = 1;
+    cvg.sample();
+    cvg.x = 2;
+    cvg.sample();
+    EXPECT_EQ(cvg.cvp.get_bin_hit_count(2), 1u);
+  }
+  fc4sc::global::delete_context(cntxt);
+}
