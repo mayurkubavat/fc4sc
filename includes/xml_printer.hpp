@@ -400,9 +400,11 @@ public:
     // it computes is too high when missing bins are left out. Define
     // FC4SC_SAVE_ALL_CROSS_BINS to write every missing bin.
     const auto& cross_bins = base.get_cross_bins();
+    size_t bins_written = 0;
 
     auto write_bin = [&](const std::vector<size_t>& indices, uint64_t count)
     {
+      bins_written++;
       // The name is made of the bin indices, as in <0,1>. Readers of UCIS
       // files tell the bins of a cross apart by their names, and add up
       // the counts of bins with the same name when files are merged.
@@ -439,30 +441,6 @@ public:
       has_bins = has_bins && (cvp->size() != 0);
     }
 
-    // A cross has no bins when one of its coverpoints has none, but the
-    // schema requires at least one crossBin. Write a single ignore bin
-    // instead, with the index -1, for no bin, for every crossed coverpoint.
-    if (!has_bins)
-    {
-      stream << "<crossBin \n";
-      stream << "name=\"&lt;";
-      for (size_t i = 0; i < sizes.size(); i++)
-        stream << (i == 0 ? "" : ",") << -1;
-      stream << "&gt;\"  \n";
-      stream << "key=\"" << get_unique_key() << "\" \n";
-      stream << "type=\"ignore\" \n";
-      stream << "> \n";
-
-      for (size_t i = 0; i < sizes.size(); i++)
-        stream << "<index>" << -1 << "</index>\n";
-
-      stream << "<contents \n";
-      stream << "coverageCount=\"" << 0 << "\"> \n";
-      stream << "</contents> \n";
-
-      stream << "</crossBin> \n";
-    }
-
     // The bins are written in the order of their indices, the last
     // coverpoint counting fastest, which is also the order of cross_bins.
     std::vector<size_t> indices(sizes.size(), 0);
@@ -488,8 +466,9 @@ public:
 
       if (hit != cross_bins.end())
         write_bin(indices, hit->second);
-      else
+      else if (base.user_bins.empty() || base.is_auto_bin(indices))
       {
+        // a product of bins in a user defined bin is not a bin
         write_bin(indices, 0);
         missing_written++;
       }
@@ -510,6 +489,59 @@ public:
       for (auto it = cross_bins.lower_bound(indices); it != cross_bins.end(); it++)
         write_bin(it->first, it->second);
     }
+
+    // The user defined bins, ignore bins and illegal bins, by name. They
+    // have the index -1, for no bin, for every crossed coverpoint, as they
+    // have no single product of bins. A user defined bin without products
+    // is not counted in the coverage, so it is not written.
+    for (auto &bin : base.user_bins)
+    {
+      if (bin.bin_type == fc4sc::bin_t::default_ && bin.size == 0)
+        continue;
+      bins_written++;
+      stream << "<crossBin \n";
+      stream << "name=\"" << escape_xml_chars(bin.name) << "\"  \n";
+      stream << "key=\"" << get_unique_key() << "\" \n";
+      if (bin.bin_type == fc4sc::bin_t::ignore_)
+        stream << "type=\"ignore\" \n";
+      else if (bin.bin_type == fc4sc::bin_t::illegal_)
+        stream << "type=\"illegal\" \n";
+      stream << "> \n";
+
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << "<index>" << -1 << "</index>\n";
+
+      stream << "<contents \n";
+      stream << "coverageCount=\"" << bin.hits << "\"> \n";
+      stream << "</contents> \n";
+
+      stream << "</crossBin> \n";
+    }
+
+    // A cross has no bins when one of its coverpoints has none, but the
+    // schema requires at least one crossBin. Write a single ignore bin
+    // instead, with the index -1, for no bin, for every crossed coverpoint.
+    if (bins_written == 0)
+    {
+      stream << "<crossBin \n";
+      stream << "name=\"&lt;";
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << (i == 0 ? "" : ",") << -1;
+      stream << "&gt;\"  \n";
+      stream << "key=\"" << get_unique_key() << "\" \n";
+      stream << "type=\"ignore\" \n";
+      stream << "> \n";
+
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << "<index>" << -1 << "</index>\n";
+
+      stream << "<contents \n";
+      stream << "coverageCount=\"" << 0 << "\"> \n";
+      stream << "</contents> \n";
+
+      stream << "</crossBin> \n";
+    }
+
 
       stream << "</cross>\n"; 
   }

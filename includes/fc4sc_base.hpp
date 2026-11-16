@@ -47,6 +47,7 @@
 #include <unordered_map>
 #include <assert.h>
 #include <memory>
+#include <stdexcept>
 
 #include "fc4sc_options.hpp"
 
@@ -572,6 +573,111 @@ public:
 };
 
 /*!
+ *  \class cross_select_node fc_base.hpp
+ *  \brief Node of a select expression of the bins of a cross
+ *
+ *  A select expression, as binsof(a.b) && !binsof(c) intersect {1},
+ *  selects products of the bins of the crossed coverpoints. A condition
+ *  selects the products which have one of a set of bins of a coverpoint,
+ *  and conditions are combined with !, && and ||. See fc4sc::binsof.
+ */
+class cross_select_node
+{
+public:
+
+  /*! Kind of the node */
+  enum op_t { condition_, not_, and_, or_ };
+
+  op_t op = condition_;
+
+  /*! Operands of !, && and || */
+  std::shared_ptr<const cross_select_node> lhs, rhs;
+
+  /*! Coverpoint of a condition */
+  const cvp_base* cvp = nullptr;
+
+  /*! Returns which bins of the coverpoint a condition selects */
+  std::function<std::vector<bool>()> select_bins;
+
+  /*! Position of the coverpoint in the cross, once resolved */
+  size_t position = 0;
+
+  /*! Bins of the coverpoint selected by a condition, once resolved */
+  std::vector<bool> bins;
+
+  /*!
+   * \brief Checks if a product of bins is selected
+   * \param product The index of a bin of each crossed coverpoint
+   */
+  bool matches(const std::vector<size_t>& product) const
+  {
+    switch (op)
+    {
+      case not_: return !lhs->matches(product);
+      case and_: return lhs->matches(product) && rhs->matches(product);
+      case or_: return lhs->matches(product) || rhs->matches(product);
+      default:
+        return position < product.size() && product[position] < bins.size() &&
+               bins[product[position]];
+    }
+  }
+
+  /*!
+   * \brief Returns a copy of this expression whose conditions know the
+   * positions and the selected bins of their coverpoints in a cross
+   * \param cvps The crossed coverpoints
+   */
+  std::shared_ptr<const cross_select_node> resolve(const std::vector<cvp_base*>& cvps) const
+  {
+    std::shared_ptr<cross_select_node> node = std::make_shared<cross_select_node>(*this);
+    if (op != condition_) {
+      node->lhs = lhs->resolve(cvps);
+      if (rhs) node->rhs = rhs->resolve(cvps);
+      return node;
+    }
+    auto it = std::find(cvps.begin(), cvps.end(), cvp);
+    if (it == cvps.end())
+      throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
+    node->position = it - cvps.begin();
+    node->bins = select_bins();
+    return node;
+  }
+};
+
+/*!
+ *  \class cross_bin_data_model fc_base.hpp
+ *  \brief Data of a user defined bin of a cross
+ *
+ *  A user defined bin of a cross holds the products of bins which its
+ *  select expression selects, as the SystemVerilog
+ *  "bins b = binsof(a.lo) && binsof(c);". An ignore bin or an illegal bin
+ *  of a cross has the type bin_t::ignore_ or bin_t::illegal_.
+ */
+class cross_bin_data_model
+{
+public:
+
+  /*! Name of the bin */
+  std::string name;
+
+  /*! Type of the bin: default_, ignore_ or illegal_ */
+  bin_t bin_type = default_;
+
+  /*! Select expression of the bin */
+  std::shared_ptr<const cross_select_node> select;
+
+  /*!
+   * Number of products of bins in the bin. The products of an ignore
+   * or illegal bin are not in the other bins. A bin without products is
+   * not counted in the coverage.
+   */
+  uint64_t size = 0;
+
+  /*! Number of samples which hit the bin */
+  uint64_t hits = 0;
+};
+
+/*!
  *  \class cross_base_data_model fc_base.hpp
  *  \brief Base class for data of crosses
  *
@@ -587,8 +693,60 @@ public:
   /*! Vector of crossed coverpoints */
   std::vector<cvp_base_data_model*> cross_cvps;
 
+  /*!
+   * User defined bins, ignore bins and illegal bins of the cross. When
+   * there are any, get_cross_bins() holds the hits of the automatically
+   * created bins only: the products of bins which are in none of them.
+   */
+  std::vector<cross_bin_data_model> user_bins;
+
+  /*! Number of automatically created bins, when there are user_bins */
+  uint64_t auto_bins_size = 0;
+
   /*! Get cross bins */
   virtual const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const = 0;
+
+  /*!
+   * \brief Checks if a product of bins is an automatically created bin,
+   * which is in no user defined bin, ignore bin or illegal bin
+   * \param product The index of a bin of each crossed coverpoint
+   */
+  bool is_auto_bin(const std::vector<size_t>& product) const
+  {
+    for (auto &bin : user_bins)
+      if (bin.select->matches(product))
+        return false;
+    return true;
+  }
+
+  /*!
+   * \brief Counts the bins of the cross which are in its coverage: the
+   * automatically created bins and the user defined bins which have
+   * products of bins, without the ignore and illegal bins
+   * \param covered Returns the number of bins hit at least option.at_least times
+   * \param total Returns the number of bins
+   */
+  void get_coverage_bins(int &covered, int &total) const
+  {
+    covered = 0;
+    if (user_bins.empty()) {
+      total = 1;
+      for (auto cvp : cross_cvps)
+        total *= cvp->size();
+    }
+    else {
+      total = auto_bins_size;
+      for (auto &bin : user_bins)
+      {
+        if (bin.bin_type != default_ || bin.size == 0)
+          continue;
+        total++;
+        covered += (bin.hits >= option.at_least);
+      }
+    }
+    for (auto &bin : get_cross_bins())
+      covered += (bin.second >= option.at_least);
+  }
 
 };
 

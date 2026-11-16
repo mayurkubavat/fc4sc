@@ -118,6 +118,8 @@ private:
    * in order to set the sample condition, expression and name.
    */
   friend class covergroup;
+  // binsof selects bins of the coverpoint for the bins of a cross
+  friend class binsof<T>;
   // friend functions that need access to the bin vectors -> add_to_cvp(coverpoint<T>&)
   friend class bin<T>;
   friend class bin_array<T>;

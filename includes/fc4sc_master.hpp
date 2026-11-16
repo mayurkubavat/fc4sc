@@ -380,6 +380,15 @@ class merged_coverage : public covVisitorBase
 
     /*! Cross: hits of each merged cross bin */
     std::map<std::vector<bin_key_t>, uint64_t> cross_hits;
+
+    /*!
+     * Cross with user defined bins: the number of automatically created
+     * bins, and the hits of each user defined bin counted in the coverage,
+     * by name. The instances of a covergroup type have the same bins.
+     */
+    bool has_user_bins = false;
+    uint64_t auto_bins_size = 0;
+    std::map<std::string, uint64_t> user_hits;
   };
 
   /*! Merged coverpoints and crosses, in the order they are first seen */
@@ -457,7 +466,13 @@ public:
       merged.weight = base.option.weight;
       merged.goal = base.option.goal;
       merged.at_least = base.option.at_least;
+      merged.has_user_bins = !base.user_bins.empty();
+      merged.auto_bins_size = base.auto_bins_size;
     }
+
+    for (auto &bin : base.user_bins)
+      if (bin.bin_type == default_ && bin.size > 0)
+        merged.user_hits[bin.name] += bin.hits;
 
     std::vector<std::vector<bin_key_t>> keys;
     for (auto cvp : base.cross_cvps)
@@ -494,7 +509,11 @@ public:
       total = merged.cross_dims.empty() ? 0 : 1;
       for (auto &dim : merged.cross_dims)
         total *= dim.size();
+      if (merged.has_user_bins)
+        total = merged.auto_bins_size + merged.user_hits.size();
       for (auto &bin : merged.cross_hits)
+        covered += (bin.second >= merged.at_least);
+      for (auto &bin : merged.user_hits)
         covered += (bin.second >= merged.at_least);
     }
     else {
@@ -645,12 +664,8 @@ public:
     cvp_weight = base.option.weight;
     
     int covered = 0;
-    int total = 1;
-
-    for(auto cvp_it : base.cross_cvps)
-    {
-      total *= cvp_it->size();
-    }
+    int total = 0;
+    base.get_coverage_bins(covered, total);
 
     this->bin_total += total;
 
@@ -659,12 +674,6 @@ public:
       return;
     }
 
-    for (auto it : base.get_cross_bins())
-    {
-      if (it.second >= base.option.at_least)
-        covered++;
-    }
-    
     this->bin_covered += covered;
 
     double real = 100.0 * covered / total;
