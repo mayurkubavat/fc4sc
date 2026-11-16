@@ -51,6 +51,24 @@ public:
   cross<int,int> cross1 = cross<int,int> (this, "cross1", &cvp1, &cvp2);
 };
 
+// cvp2 has no regular bins, so the cross of cvp1 and cvp2 has no bins
+class cross_xml_no_bins_test : public covergroup {
+public:
+  CG_CONS(cross_xml_no_bins_test) {};
+
+  int SAMPLE_POINT(sample_point_1, cvp1);
+  int SAMPLE_POINT(sample_point_2, cvp2);
+
+  coverpoint<int> cvp1 = coverpoint<int> (this, "cvp1",
+    bin<int>("one", 1),
+    bin<int>("two", 2)
+  );
+  coverpoint<int> cvp2 = coverpoint<int> (this, "cvp2",
+    ignore_bin<int>("ignored", 5)
+  );
+  cross<int,int> cross1 = cross<int,int> (this, "cross1", &cvp1, &cvp2);
+};
+
 namespace {
 
 struct cross_bin {
@@ -268,6 +286,32 @@ TEST(cross_xml, bin_names) {
     names.insert(name);
   }
   EXPECT_EQ(names.size(), 6u);
+
+  fc4sc::global::delete_context(cntxt);
+}
+
+// A cross of a coverpoint without regular bins has no bins. The schema
+// requires at least one crossBin, so a single ignore bin is written which
+// has the index -1, for no bin, for every crossed coverpoint.
+TEST(cross_xml, no_bins) {
+  auto cntxt = fc4sc::global::create_new_context();
+  cross_xml_no_bins_test cg("cg", __FILE__, __LINE__, cntxt);
+  cg.sample_point_1 = 1;
+  cg.sample_point_2 = 5;
+  cg.sample();
+
+  xml_printer::coverage_save("cross_xml_no_bins.xml", cntxt);
+  const std::string xml = read_file("cross_xml_no_bins.xml");
+  auto bins = read_cross_bins(xml);
+
+  ASSERT_EQ(bins.size(), 1u);
+  EXPECT_EQ(bins[0].indices, std::vector<int>(read_cross_exprs(xml).size(), -1));
+  EXPECT_EQ(bins[0].count, 0);
+
+  size_t pos = 0;
+  const std::string element = next_element(xml, "<crossBin", "</crossBin>", pos);
+  size_t type_pos = 0;
+  EXPECT_EQ(next_element(element, "type=\"", "\"", type_pos), "ignore");
 
   fc4sc::global::delete_context(cntxt);
 }
