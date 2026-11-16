@@ -64,6 +64,8 @@ using fc4sc::bin_array;
 using fc4sc::binsof;
 using fc4sc::ignore_bin;
 using fc4sc::illegal_bin;
+using fc4sc::wildcard;
+using fc4sc::wildcard_values;
 using fc4sc::coverpoint;
 using fc4sc::cross;
 using fc4sc::covergroup;

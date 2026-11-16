@@ -39,6 +39,10 @@
 #include <vector>
 #include <sstream>
 #include <memory>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 
 #include "fc4sc_base.hpp"
 
@@ -60,6 +64,205 @@ static std::vector<interval_t<T>> intersection(const bin<T>& lhs, const bin<T>& 
 
 template <typename T>
 static std::vector<interval_t<T>> intersection(const bin<T>& lhs, const std::vector<interval_t<T>>& rhs);
+
+/*!
+ * \brief Maximum number of intervals a wildcard pattern may expand to
+ */
+static const uint64_t wildcard_max_intervals = 1 << 16;
+
+/*!
+ *  \brief Parses a wildcard pattern into the bits to match and their values
+ *  \param pattern The pattern, see \link fc4sc::wildcard \endlink
+ *  \param width Number of bits of the coverpoint type
+ *  \param value Returns the values of the bits to match
+ *  \param care Returns a mask of the bits to match
+ */
+inline void parse_wildcard(const std::string& pattern, unsigned int width,
+                           uint64_t& value, uint64_t& care)
+{
+  const std::string error = "Invalid wildcard pattern \"" + pattern + "\": ";
+  std::string digits = pattern;
+  unsigned int digit_bits = 1;
+  size_t size = 0;
+
+  size_t quote = pattern.find('\'');
+  if (quote != std::string::npos) {
+    if (quote + 1 >= pattern.size())
+      throw std::invalid_argument(error + "missing base");
+    switch (pattern[quote + 1]) {
+      case 'b': case 'B': digit_bits = 1; break;
+      case 'o': case 'O': digit_bits = 3; break;
+      case 'h': case 'H': digit_bits = 4; break;
+      default: throw std::invalid_argument(error + "base must be 'b, 'o or 'h");
+    }
+    if (quote > 0) {
+      if (pattern.find_first_not_of("0123456789") < quote)
+        throw std::invalid_argument(error + "bad size");
+      size = std::stoul(pattern.substr(0, quote));
+      if (size == 0)
+        throw std::invalid_argument(error + "bad size");
+    }
+    digits = pattern.substr(quote + 2);
+  }
+
+  // bits of the pattern, LSB first: 0, 1 or 2 for a don't care bit
+  std::vector<int> bits;
+  for (auto it = digits.rbegin(); it != digits.rend(); ++it)
+  {
+    const char c = *it;
+    if (c == '_') continue;
+    int digit;
+    if (c == 'x' || c == 'X' || c == 'z' || c == 'Z' || c == '?') {
+      digit = -1;
+    }
+    else if (c >= '0' && c <= '9') {
+      digit = c - '0';
+    }
+    else if (c >= 'a' && c <= 'f') {
+      digit = c - 'a' + 10;
+    }
+    else if (c >= 'A' && c <= 'F') {
+      digit = c - 'A' + 10;
+    }
+    else {
+      throw std::invalid_argument(error + "bad digit '" + c + "'");
+    }
+    if (digit >= (1 << digit_bits))
+      throw std::invalid_argument(error + "bad digit '" + c + "'");
+    for (unsigned int i = 0; i < digit_bits; ++i)
+      bits.push_back((digit < 0) ? 2 : ((digit >> i) & 1));
+  }
+  if (bits.empty())
+    throw std::invalid_argument(error + "no digits");
+
+  if (size > 0) {
+    // as for SystemVerilog literals: a pattern shorter than its size is
+    // extended with zeros, or with don't care bits if its leftmost bit is one
+    int ext = (bits.back() == 2) ? 2 : 0;
+    while (bits.size() < size) bits.push_back(ext);
+    while (bits.size() > size) {
+      if (bits.back() == 1)
+        throw std::invalid_argument(error + "digits do not fit in the size");
+      bits.pop_back();
+    }
+  }
+
+  value = 0;
+  // bits above the pattern are zero, so they must be matched
+  care = (width >= 64) ? ~uint64_t(0) : ((uint64_t(1) << width) - 1);
+  for (size_t i = 0; i < bits.size(); ++i)
+  {
+    if (i >= width) {
+      if (bits[i] != 0)
+        throw std::invalid_argument(error + "wider than the coverpoint type");
+      continue;
+    }
+    if (bits[i] == 2)
+      care &= ~(uint64_t(1) << i);
+    else if (bits[i] == 1)
+      value |= (uint64_t(1) << i);
+  }
+}
+
+/*!
+ *  \brief Returns the values which match a wildcard pattern, as intervals
+ *  \param pattern Binary digits, MSB first, where x, X, z, Z and ? are
+ *  don't care bits and _ is ignored, as in "1??0" or "10_xx". The pattern may
+ *  also be written as a SystemVerilog literal with a 'b, 'o or 'h base and an
+ *  optional size, as in "4'b1??0" or "'h3?", where an x digit is a don't care
+ *  digit. Bits above the pattern must be zero.
+ *  \returns The matching values, as sorted and disjoint intervals
+ *
+ *    The SystemVerilog "wildcard bins b = { 4'b11?? };" is written
+ *  bin<T>("b", wildcard<T>("4'b11??")), and the same works for illegal_bin
+ *  and ignore_bin.
+ */
+template <typename T>
+std::vector<interval_t<T>> wildcard(const std::string& pattern)
+{
+  static_assert(std::is_integral<T>::value && !std::is_same<T, bool>::value,
+                "Type must be integral!");
+  typedef typename std::make_unsigned<T>::type U;
+  const unsigned int width = std::numeric_limits<U>::digits;
+
+  uint64_t value, care;
+  parse_wildcard(pattern, width, value, care);
+
+  // the don't care bits at the bottom make one block of consecutive values,
+  // all combinations of the other don't care bits give the blocks to match
+  unsigned int low = 0;
+  while (low < width && !((care >> low) & 1)) ++low;
+
+  std::vector<unsigned int> free_bits;
+  for (unsigned int i = low; i < width; ++i)
+    if (!((care >> i) & 1)) free_bits.push_back(i);
+
+  if (free_bits.size() >= 64 || (uint64_t(1) << free_bits.size()) > wildcard_max_intervals)
+    throw std::invalid_argument("Wildcard pattern \"" + pattern + "\" matches too many intervals");
+
+  const U block = (low >= width) ? std::numeric_limits<U>::max()
+                                 : static_cast<U>((uint64_t(1) << low) - 1);
+  const U sign = static_cast<U>(U(1) << (width - 1));
+
+  std::vector<interval_t<T>> intervals;
+  for (uint64_t comb = 0; comb < (uint64_t(1) << free_bits.size()); ++comb)
+  {
+    uint64_t start = value & care;
+    for (size_t i = 0; i < free_bits.size(); ++i)
+      if ((comb >> i) & 1) start |= (uint64_t(1) << free_bits[i]);
+
+    const U lo = static_cast<U>(start);
+    const U hi = static_cast<U>(lo + block);
+    if (std::is_signed<T>::value && lo < sign && hi >= sign) {
+      // the block crosses from positive to negative values
+      intervals.push_back(interval(static_cast<T>(lo), static_cast<T>(sign - 1)));
+      intervals.push_back(interval(static_cast<T>(sign), static_cast<T>(hi)));
+    }
+    else {
+      intervals.push_back(interval(static_cast<T>(lo), static_cast<T>(hi)));
+    }
+  }
+
+  std::sort(intervals.begin(), intervals.end());
+
+  // merge the intervals which are next to each other
+  std::vector<interval_t<T>> merged;
+  for (auto &intv : intervals)
+  {
+    if (!merged.empty() && merged.back().second != std::numeric_limits<T>::max() &&
+        merged.back().second + 1 == intv.first)
+      merged.back().second = intv.second;
+    else
+      merged.push_back(intv);
+  }
+  return merged;
+}
+
+/*!
+ *  \brief Returns the values which match a wildcard pattern
+ *  \param pattern The pattern, see \link fc4sc::wildcard \endlink
+ *  \returns The matching values, sorted
+ *
+ *    The SystemVerilog "wildcard bins b[] = { 4'b11?? };", which has a bin
+ *  for each matching value, is written
+ *  bin_array<T>("b", wildcard_values<T>("4'b11??")).
+ */
+template <typename T>
+std::vector<T> wildcard_values(const std::string& pattern)
+{
+  std::vector<T> values;
+  for (auto &intv : wildcard<T>(pattern))
+  {
+    for (T v = intv.first; ; ++v)
+    {
+      if (values.size() >= wildcard_max_intervals)
+        throw std::invalid_argument("Wildcard pattern \"" + pattern + "\" matches too many values");
+      values.push_back(v);
+      if (v == intv.second) break;
+    }
+  }
+  return values;
+}
 
 /*!
  * \brief Defines a class for bin data model
