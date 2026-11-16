@@ -295,7 +295,9 @@ private:
    */
   interval_map_iterator_t add_range_map(interval_map_iterator_t hint_it,interval_map_t& interval_map,bin_range_t bin_range_key,fc4sc::interval_t<T> range)
   {
-    if(interval_map.empty() || range.second < hint_it->first.first) {
+    // hint_it is end() when the range is after all the intervals: nothing
+    // is to be read from it, and the loop below appends the range
+    if(hint_it != interval_map.end() && range.second < hint_it->first.first) {
       std::vector<bin_range_t> bin_range_vec{bin_range_key};
       return std::next( interval_map.insert(hint_it,{range, bin_range_vec }) );
     }
