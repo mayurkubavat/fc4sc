@@ -84,4 +84,5 @@ endif()
 
 if(FC4SC_BUILD_EXAMPLES)
   add_subdirectory(examples/fir)
+  add_subdirectory(examples/coverage_merge)
 endif()

@@ -661,10 +661,13 @@ public:
 
   /*!
    * \brief Prints data to the given file name
-   * \param file_name Where to print. Returns if empty
+   * \param name Where to print. When it is empty, the name set by
+   * fc4sc::global::set_coverage_db_name() is used, and nothing is printed if
+   * there is none
    */
-  static void coverage_save(const std::string &file_name = "", fc4sc::global* cntxt = fc4sc::global::getter(), const fc4sc_format how = fc4sc_format::ucis_xml)
+  static void coverage_save(const std::string &name = "", fc4sc::global* cntxt = fc4sc::global::getter(), const fc4sc_format how = fc4sc_format::ucis_xml)
   {
+    const std::string file_name = name.empty() ? fc4sc::global::get_coverage_db_name(cntxt) : name;
     if (file_name.empty()) {
       std::cerr << "FC4SC " << __FUNCTION__ << ": Error! Function was passed "
 	  "empty string as the file name\n";

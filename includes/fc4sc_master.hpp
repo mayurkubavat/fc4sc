@@ -197,6 +197,9 @@ public:
     /*! key generation for file IDs*/
     unsigned int gkey = 1;
 
+    /*! Name of the coverage database file, see set_coverage_db_name() */
+    std::string coverage_db_name;
+
     /*!
      * \brief gets file_id_to_name table
     */
@@ -744,6 +747,24 @@ public:
   static global *create_new_context()
   {
     return new global;
+  }
+
+  /*!
+   * \brief Sets the name of the file which xml_printer::coverage_save()
+   * writes when it is given no file name, as the SystemVerilog
+   * $set_coverage_db_name
+   */
+  static void set_coverage_db_name(const std::string& file_name, fc4sc::global* cvg_cntxt = fc4sc::global::getter())
+  {
+    cvg_cntxt->coverage_db_name = file_name;
+  }
+
+  /*!
+   * \brief Returns the name set by set_coverage_db_name(), or an empty string
+   */
+  static const std::string& get_coverage_db_name(fc4sc::global* cvg_cntxt = fc4sc::global::getter())
+  {
+    return cvg_cntxt->coverage_db_name;
   }
 
   static void delete_context(global* cntxt)

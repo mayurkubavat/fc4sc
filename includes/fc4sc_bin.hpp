@@ -1460,6 +1460,30 @@ public:
   {
     return array;
   }
+
+  /*! Adds hits to a value of a default bin array, the value written in decimal */
+  bool add_value_hits(const std::string& value, uint64_t count)
+  {
+    if (!array || value.empty()) return false;
+    typedef typename std::conditional<std::is_signed<T>::value, long long, unsigned long long>::type wide_t;
+    // the value must be written as to_decimal() writes it
+    std::istringstream in(value);
+    wide_t wide = 0;
+    if (!(in >> wide) || !in.eof() || to_decimal(static_cast<T>(wide)) != value)
+      return false;
+    const T v = static_cast<T>(wide);
+    for (size_t i = 0; i < this->intervals.size(); ++i)
+    {
+      if (v < this->intervals[i].first || v > this->intervals[i].second) continue;
+      uint64_t& hits = this->interval_hits[i];
+      uint64_t& value_hits_v = value_hits[v];
+      const uint64_t max = std::numeric_limits<uint64_t>::max();
+      hits = (hits > max - count) ? max : hits + count;
+      value_hits_v = (value_hits_v > max - count) ? max : value_hits_v + count;
+      return true;
+    }
+    return false;
+  }
 };
 
 /*!

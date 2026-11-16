@@ -323,6 +323,18 @@ public:
     return false;
   }
 
+  /*!
+   * Adds hits to a value of a default bin array, the value written in
+   * decimal. Returns false if this is not a default bin array, or if the
+   * value is not one of its values.
+   */
+  virtual bool add_value_hits(const std::string& value, uint64_t count)
+  {
+    (void)value;
+    (void)count;
+    return false;
+  }
+
   /*! Get name of bin */
   virtual std::string& get_name() = 0;
 
@@ -741,6 +753,13 @@ public:
 
   /*! Get cross bins */
   virtual const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const = 0;
+
+  /*!
+   * \brief Adds hits to an automatically created bin
+   * \param product The index of a bin of each crossed coverpoint
+   * \param count Number of hits to add
+   */
+  virtual void add_cross_bin_hits(const std::vector<size_t>& product, uint64_t count) = 0;
 
   /*!
    * \brief Checks if a product of bins is an automatically created bin,

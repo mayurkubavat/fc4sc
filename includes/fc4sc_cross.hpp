@@ -34,6 +34,7 @@
 #ifndef FC4SC_CROSS_HPP
 #define FC4SC_CROSS_HPP
 
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
@@ -67,6 +68,14 @@ public:
   virtual const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const
   {
     return bins;
+  }
+
+  /*! Adds hits to an automatically created bin */
+  virtual void add_cross_bin_hits(const std::vector<size_t>& product, uint64_t count)
+  {
+    uint64_t& hits = bins[product];
+    hits = (hits > std::numeric_limits<uint64_t>::max() - count) ? std::numeric_limits<uint64_t>::max()
+                                                                  : hits + count;
   }
 
   uint64_t size() const

@@ -57,6 +57,7 @@ namespace fc4sc {
 #include "fc4sc_covergroup.hpp"
 #include "fc4sc_scope.hpp"
 #include "xml_printer.hpp"
+#include "fc4sc_coverage_db.hpp"
 
 using fc4sc::interval;
 using fc4sc::bin;
