@@ -376,14 +376,14 @@ public:
       return;
     if (inst_name.empty()) {
       std::cerr << "Error: the name of covergroup " << old_name << " cannot be set to an empty string\n";
-      throw("The name of covergroup " + old_name + " cannot be set to an empty string");
+      throw("Cannot set the name of a covergroup to an empty string");
     }
 
     scp_base_data_model* scp_data = cvg_data->parent_scp;
     if (scp_data != nullptr) {
       if (scp_data->cvg_insts.count(inst_name) > 0 || scp_data->child_scp_insts.count(inst_name) > 0) {
         std::cerr << "Error: " << inst_name << " scope name already in use\n";
-        throw("Cannot rename covergroup " + old_name + " to " + inst_name + ": the name is already in use");
+        throw("Cannot set the name of a covergroup to a name already in use");
       }
       auto it = scp_data->cvg_insts.find(old_name);
       if (it != scp_data->cvg_insts.end() && it->second == cvg_data)

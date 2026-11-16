@@ -101,8 +101,9 @@ TEST(set_inst_name, renames_instance) {
   reuse.sample(0, 0);
 
   // the name of another instance cannot be taken, and nothing changes
-  EXPECT_ANY_THROW(cg.set_inst_name("other"));
-  EXPECT_ANY_THROW(cg.set_inst_name(""));
+  // what is thrown is a C string, as in the rest of the library
+  EXPECT_THROW(cg.set_inst_name("other"), const char*);
+  EXPECT_THROW(cg.set_inst_name(""), const char*);
   EXPECT_EQ(cg.name(), "after");
   EXPECT_EQ(&scope->get_covergroup("other"), &other);
 
