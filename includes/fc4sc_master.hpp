@@ -481,6 +481,56 @@ public:
   void visit(bin_base_data_model&) { }
 
   /*!
+   * \brief Computes the coverage of a merged coverpoint or cross
+   * \param merged The merged coverpoint or cross
+   * \param covered Number of covered merged bins
+   * \param total Total number of merged bins
+   * \returns Double between 0 and 100
+   */
+  static double get_merged_coverage(const merged_cvp& merged, int &covered, int &total)
+  {
+    covered = 0;
+    if (merged.is_cross) {
+      total = merged.cross_dims.empty() ? 0 : 1;
+      for (auto &dim : merged.cross_dims)
+        total *= dim.size();
+      for (auto &bin : merged.cross_hits)
+        covered += (bin.second >= merged.at_least);
+    }
+    else {
+      total = merged.bin_hits.size();
+      for (auto &bin : merged.bin_hits)
+        covered += (bin.second >= merged.at_least);
+    }
+
+    if (total == 0)
+      return (merged.weight == 0) ? 100 : 0;
+
+    double real = 100.0 * covered / total;
+    return (real >= merged.goal) ? 100 : real;
+  }
+
+  /*!
+   * \brief Computes the type coverage of one coverpoint or cross on the
+   * merged instances of a covergroup type
+   * \param type_data The covergroup type
+   * \param name Name of the coverpoint or cross
+   * \param covered Number of covered merged bins
+   * \param total Total number of merged bins
+   * \returns Double between 0 and 100; 100 if no instance is enabled
+   */
+  double get_cvp_coverage(cvg_metadata& type_data, const std::string& name, int &covered, int &total)
+  {
+    covered = 0;
+    total = 0;
+    for (auto cvg : type_data.cvg_insts)
+      cvg->accept_visitor(*this);
+    if (cvps.count(name) == 0)
+      return 100;
+    return get_merged_coverage(cvps[name], covered, total);
+  }
+
+  /*!
    * \brief Computes the merged coverage of all instances of a covergroup type
    * \param type_data The covergroup type
    * \returns Double between 0 and 100
@@ -507,31 +557,10 @@ public:
       merged_cvp& merged = cvps[name];
       int covered = 0;
       int total = 0;
-
-      if (merged.is_cross) {
-        total = merged.cross_dims.empty() ? 0 : 1;
-        for (auto &dim : merged.cross_dims)
-          total *= dim.size();
-        for (auto &bin : merged.cross_hits)
-          covered += (bin.second >= merged.at_least);
-      }
-      else {
-        total = merged.bin_hits.size();
-        for (auto &bin : merged.bin_hits)
-          covered += (bin.second >= merged.at_least);
-      }
+      double cvp_res = get_merged_coverage(merged, covered, total);
 
       this->bin_total += total;
       this->bin_covered += covered;
-
-      double cvp_res;
-      if (total == 0) {
-        cvp_res = (merged.weight == 0) ? 100 : 0;
-      }
-      else {
-        double real = 100.0 * covered / total;
-        cvp_res = (real >= merged.goal) ? 100 : real;
-      }
 
       res += cvp_res * merged.weight;
       weights += merged.weight;
@@ -806,7 +835,9 @@ public:
   /*!
    * \brief Computes the type coverage of a coverpoint or cross
    *
-   * The type coverage of a coverpoint or cross is the weighted average of
+   * If type_option.merge_instances is set, the type coverage of a
+   * coverpoint or cross is computed on its merged bins, as for the type
+   * coverage of the covergroup. Otherwise it is the weighted average of
    * its coverage in each enabled instance of the covergroup type it is in,
    * with the weights of these covergroup instances, as for the type
    * coverage of the covergroup. It is 100 if no instance is enabled or all
@@ -831,6 +862,11 @@ public:
       weights.push_back(1);
     }
     else {
+      if (cvg->type_data->type_option.merge_instances) {
+        merged_coverage merged;
+        return merged.get_cvp_coverage(*cvg->type_data, cvp->name, covered, total);
+      }
+
       // all the instances of a covergroup type have the same coverpoints
       // and crosses, in the same order
       size_t index = std::find(cvg->cvps.begin(), cvg->cvps.end(), cvp) - cvg->cvps.begin();
