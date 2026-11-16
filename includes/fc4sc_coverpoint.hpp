@@ -40,6 +40,7 @@
 #include <functional>
 #include <tuple>
 #include <algorithm> // std::find
+#include <set>
 
 #include "fc4sc_bin.hpp"
 
@@ -212,6 +213,33 @@ private:
   /*! Sampling switch */
   bool collect = true;
 
+  /*! Whether the bins have been checked for option.detect_overlap */
+  bool overlap_checked = false;
+
+  /*!
+   *  \brief Prints a warning for each pair of regular bins whose values
+   *  overlap, for option.detect_overlap
+   */
+  void report_overlapping_bins()
+  {
+    std::set<std::pair<unsigned int, unsigned int>> reported;
+    for (auto &entry : regular_interval_map)
+    {
+      std::set<unsigned int> bin_indexes;
+      for (auto &bin_range : entry.second)
+        bin_indexes.insert(bin_range.first);
+      for (auto first = bin_indexes.begin(); first != bin_indexes.end(); ++first)
+        for (auto second = std::next(first); second != bin_indexes.end(); ++second)
+        {
+          if (!reported.insert(std::make_pair(*first, *second)).second)
+            continue;
+          std::cerr << "Warning: bins " << bins[*first].name() << " and "
+                    << bins[*second].name() << " of coverpoint "
+                    << cvp_data->name << " overlap\n";
+        }
+    }
+  }
+
   coverpoint<T>& operator=(coverpoint<T>& rh) = delete;
 
   /*
@@ -357,6 +385,14 @@ private:
 #ifdef FC4SC_DISABLE_SAMPLING
     return;
 #endif
+    // The options are plain fields which are set after the bins are
+    // defined, so option.detect_overlap is looked at when sampling: the
+    // check is made once, on the first sample after the option is set,
+    // even if sampling is stopped.
+    if (!overlap_checked && cvp_data->option.detect_overlap) {
+      overlap_checked = true;
+      report_overlapping_bins();
+    }
     if (!collect) return;
     this->last_sample_success = false;
 
@@ -622,6 +658,33 @@ public:
     covered = res;
     double real = res * 100 / total;
     return (real >= this->cvp_data->option.goal) ? 100 : real;
+  }
+
+  /*!
+   *  \brief Computes the type coverage of this coverpoint: its coverage
+   *  across all the instances of the covergroup type it is in
+   *  \returns Coverage value as a double between 0 and 100
+   */
+  double get_coverage() const
+  {
+    int covered = 0;
+    int total = 0;
+    return this->get_coverage(covered, total);
+  }
+
+  /*!
+   *  \brief Computes the type coverage of this coverpoint
+   *  \param covered Number of covered bins, summed over the instances
+   *  \param total Total number of bins, summed over the instances
+   *  \returns Coverage value as a double between 0 and 100
+   */
+  double get_coverage(int &covered, int &total) const
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return fc4sc::global::get_cvp_coverage(cvp_data, covered, total);
   }
 
   /*!
