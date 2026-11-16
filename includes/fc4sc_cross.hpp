@@ -248,17 +248,36 @@ public:
     }
 
     if (!this->collect) return;
-    std::vector <size_t> hit_bins;
+
+    // the bins hit by the sample, for each coverpoint
+    std::vector<std::vector<size_t>> hit_bins;
     for (auto& cvp : cvps_vec) {
-      if (cvp->last_sample_success) {
-        hit_bins.push_back(cvp->last_bin_index_hit);
-      }
-      else {
+      if (!cvp->last_sample_success) {
         crs_data->misses++;
         return;
       }
+      if (cvp->last_bins_hit.empty())
+        hit_bins.push_back(std::vector<size_t>(1, cvp->last_bin_index_hit));
+      else
+        hit_bins.push_back(cvp->last_bins_hit);
     }
-    crs_data->bins[hit_bins]++;
+
+    // As in SystemVerilog, every combination of the hit bins is hit once
+    std::vector<size_t> pos(hit_bins.size(), 0);
+    std::vector<size_t> key(hit_bins.size());
+    while (true) {
+      for (size_t i = 0; i < hit_bins.size(); ++i)
+        key[i] = hit_bins[i][pos[i]];
+      crs_data->bins[key]++;
+
+      // next combination, the last coverpoint counting fastest
+      size_t i = hit_bins.size();
+      while (i > 0 && ++pos[i - 1] == hit_bins[i - 1].size()) {
+        pos[i - 1] = 0;
+        --i;
+      }
+      if (i == 0) break;
+    }
   }
 
   /*!

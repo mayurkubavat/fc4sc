@@ -441,6 +441,7 @@ private:
       if (data->sample(trans_history, trans_clean, &ignored_lengths) >= 0) {
         this->last_bin_index_hit = index;
         this->last_sample_success = true;
+        this->last_bins_hit.push_back(index);
       }
     }
   }
@@ -465,6 +466,7 @@ private:
     }
     if (!collect) return;
     this->last_sample_success = false;
+    this->last_bins_hit.clear();
 
     // 1) Search if the value is in the ignore bins
     bool ignored = false;
@@ -512,11 +514,16 @@ private:
         if (this->bins[bin_range_it.first].sample(cvp_val,bin_range_it.second)) {
           this->last_bin_index_hit = bin_range_it.first;
           this->last_sample_success = true;
-          if (this->stop_sample_on_first_bin_hit) return;
+          this->last_bins_hit.push_back(bin_range_it.first);
+          if (this->stop_sample_on_first_bin_hit) break;
         }
       }
     }
-    
+
+    std::sort(this->last_bins_hit.begin(), this->last_bins_hit.end());
+    this->last_bins_hit.erase(std::unique(this->last_bins_hit.begin(), this->last_bins_hit.end()),
+                              this->last_bins_hit.end());
+
     if (!this->last_sample_success) { cvp_data->misses++; }
   }
 
@@ -716,6 +723,7 @@ public:
         // used for crossing has a sample condition which is not met.
         this->last_sample_success = false;
         this->last_bin_index_hit = 0;
+        this->last_bins_hit.clear();
       }
     }
     else {
