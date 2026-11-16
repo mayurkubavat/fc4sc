@@ -961,6 +961,11 @@ public:
  * The bin is hit at most once per sample: if several of its sequences end
  * with a sample, the shortest one is counted. A transition which has a
  * value of an ignore bin in it is not hit.
+ *
+ *   A cross sees one bin of each coverpoint per sample. If a sample hits
+ * a value bin and a transition bin of the same coverpoint, the cross takes
+ * the value bin. Transition bins cannot be created in the coverpoints of a
+ * dynamic covergroup.
  */
 template <class T>
 class transition_bin : public bin<T>
