@@ -154,7 +154,7 @@ class cross : public cross_base
   {
 
     // See if the current value is in its coverpoint, and where
-    std::vector<size_t> bin_indexes = (static_cast<coverpoint<Head> *>(cvps_vec[k - 1]))->get_bin_index(h);
+    std::vector<size_t> bin_indexes = (static_cast<coverpoint<Head> *>(cvps_vec[sizeof...(Args) - k]))->get_bin_index(h);
 
     // If atleast one bin has it
     bool found_in_cvp = bin_indexes.size() > 0;
@@ -192,8 +192,6 @@ class cross : public cross_base
 
     total_coverpoints = get_size(args...);
     cvps_vec = std::vector<cvp_base*>{args...};
-
-    std::reverse(cvps_vec.begin(), cvps_vec.end());
     for(auto cvp_it : cvps_vec) {
       crs_data->cross_cvps.push_back(cvp_it->get_data());
     }
@@ -217,8 +215,6 @@ public:
 
     total_coverpoints = get_size(args...);
     cvps_vec = std::vector<cvp_base*>{args...};
-
-    std::reverse(cvps_vec.begin(), cvps_vec.end());
     for(auto cvp_it : cvps_vec) {
       crs_data->cross_cvps.push_back(cvp_it->get_data());
     }
