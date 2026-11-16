@@ -358,6 +358,8 @@ public:
       bin->accept_visitor(*this);
     for (auto bin : base.ignore_bins_data)
       bin->accept_visitor(*this);
+    for (auto bin : base.default_bins_data)
+      bin->accept_visitor(*this);
 
     stream << "</coverpoint>\n\n";
   }
@@ -439,8 +441,58 @@ public:
       stream << "</cross>\n"; 
   }
 
+  /*!
+   * \brief Writes a default bin. The type "default" of UCIS is the type of
+   * the regular bins, which are counted in the coverage, so a default bin is
+   * written as an ignore bin, which is not. A default bin array has a bin
+   * for each value hit. A bin without values or hits is not written, as a
+   * bin needs at least one range.
+   */
+  void write_default_bin(fc4sc::bin_base_data_model& base)
+  {
+    if (base.is_value_array()) {
+      for (auto &hit : base.get_value_hits_to_int())
+      {
+        write_ignore_bin(base.get_name() + "[" + std::to_string(hit.first) + "]",
+                         std::vector<fc4sc::interval_t<int>>(1, fc4sc::interval(hit.first, hit.first)),
+                         std::vector<uint64_t>(1, hit.second));
+      }
+    }
+    else if (!base.get_intervals_to_int().empty()) {
+      write_ignore_bin(base.get_name(), base.get_intervals_to_int(), base.get_interval_hits());
+    }
+  }
+
+  /*!
+   * \brief Writes an ignore bin of a coverpoint
+   */
+  void write_ignore_bin(const std::string& name, const std::vector<fc4sc::interval_t<int>>& intervals,
+                        const std::vector<uint64_t>& hits)
+  {
+    stream << "<coverpointBin name=\"" << escape_xml_chars(name) << "\" \n";
+    stream << "key=\"" << get_unique_key() << "\" \n";
+    stream << "type=\"ignore\" >\n";
+    for (size_t i = 0; i < intervals.size(); ++i)
+    {
+      stream << "<range \n"
+             << "from=\"" << intervals[i].first << "\" \n"
+             << "to =\"" << intervals[i].second << "\"\n"
+             << ">\n";
+      stream << "<contents "
+             << "coverageCount=\"" << hits[i] << "\">";
+      stream << "</contents>\n";
+      stream << "</range>\n\n";
+    }
+    stream << "</coverpointBin>\n";
+  }
+
   void visit(fc4sc::bin_base_data_model& base)
   {
+    if (base.get_bin_type() == fc4sc::bin_t::default_bin_) {
+      write_default_bin(base);
+      return;
+    }
+
     stream << "<coverpointBin name=\"" << escape_xml_chars(base.get_name()) << "\" \n";
  
     stream << "key=\"" << get_unique_key() << "\" \n";
@@ -455,6 +507,7 @@ public:
         ucis_bin_type = "illegal";
 	break;
       case fc4sc::bin_t::ignore_:
+      case fc4sc::bin_t::default_bin_:
         ucis_bin_type = "ignore";
 	break;
     }

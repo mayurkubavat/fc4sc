@@ -241,7 +241,13 @@ typedef enum
 {
   default_,
   illegal_,
-  ignore_
+  ignore_,
+  /*!
+   * A default bin, as the SystemVerilog "bins b = default;": it holds the
+   * values which are in no other bin, and is not counted in the coverage.
+   * default_ is the type of the regular bins.
+   */
+  default_bin_
 } bin_t;
 
 /*!
@@ -295,6 +301,22 @@ public:
   virtual std::vector<std::vector<int>> get_sequences_to_int() const
   {
     return std::vector<std::vector<int>>();
+  }
+
+  /*!
+   * Get the hit count of each value of a default bin array, as the
+   * SystemVerilog "bins b[] = default;", in type int. The array has a bin
+   * for each value hit. Empty for other bins.
+   */
+  virtual std::map<int, uint64_t> get_value_hits_to_int() const
+  {
+    return std::map<int, uint64_t>();
+  }
+
+  /*! Whether this is a default bin array, with a bin for each value hit */
+  virtual bool is_value_array() const
+  {
+    return false;
   }
 
   /*! Get name of bin */
@@ -491,6 +513,9 @@ public:
   /*! Vector of pointers to ignore bin data */
   std::vector<bin_base_data_model*> ignore_bins_data;
 
+  /*! Vector of pointers to default bin data, see bin_t::default_bin_ */
+  std::vector<bin_base_data_model*> default_bins_data;
+
   /*! Get reference to sample expression string */
   virtual std::string& get_sample_expression_str() = 0;
 
@@ -507,6 +532,9 @@ public:
       delete bin_it;
     }
     for(auto bin_it : this->ignore_bins_data) {
+      delete bin_it;
+    }
+    for(auto bin_it : this->default_bins_data) {
       delete bin_it;
     }
   }
@@ -537,6 +565,12 @@ public:
 
   /*! Get vector of ignore bins associated with this coverpoint */
   virtual std::vector<bin_base*> get_ignore_bins_base() = 0;
+
+  /*! Get vector of default bins associated with this coverpoint */
+  virtual std::vector<bin_base*> get_default_bins_base()
+  {
+    return std::vector<bin_base*>();
+  }
 
   /*! Destructor */
   virtual ~coverpoint_base() { }

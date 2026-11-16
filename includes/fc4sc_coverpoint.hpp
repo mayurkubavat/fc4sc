@@ -123,6 +123,7 @@ private:
   friend class ignore_bin<T>;
   friend class illegal_bin<T>;
   friend class transition_bin<T>;
+  friend class default_bin<T>;
 
   template<typename U, typename V>
   friend class dynamic_coverpoint_factory;
@@ -188,6 +189,17 @@ private:
       std::fill(new_bin_data->interval_hits.begin(),new_bin_data->interval_hits.end(),0);
     }
 
+    for(auto& bin_it : this->default_bins)
+    {
+      auto new_bin_data = new default_bin_data_model<T>;
+      cvp->default_bins.push_back(bin_it);
+      cvp->default_bins.back().bin_data = new_bin_data;
+      *new_bin_data = *static_cast<default_bin_data_model<T>*>(bin_it.bin_data);
+      cvp->cvp_data->default_bins_data.push_back(new_bin_data);
+      std::fill(new_bin_data->interval_hits.begin(),new_bin_data->interval_hits.end(),0);
+      new_bin_data->value_hits.clear();
+    }
+
     cvp->has_sample_expression = this->has_sample_expression;
     cvp->sample_expression = this->sample_expression;
     cvp->sample_condition = this->sample_condition;
@@ -210,6 +222,48 @@ private:
   std::vector<illegal_bin<T>> illegal_bins;
   /*! Ignore bins contained in this coverpoint */
   std::vector<ignore_bin<T>> ignore_bins;
+  /*! Default bins contained in this coverpoint */
+  std::vector<default_bin<T>> default_bins;
+
+  /*!
+   *  \brief Gives the default bins the values which are in no other bin.
+   *  Called when a bin is added, as the values of the default bins depend
+   *  on all the other bins.
+   */
+  void update_default_bins()
+  {
+    if (default_bins.empty()) return;
+
+    std::vector<fc4sc::interval_t<T>> used;
+    for (auto &bin_it : bins)
+      used.insert(used.end(), bin_it.bin_data->intervals.begin(), bin_it.bin_data->intervals.end());
+    for (auto &bin_it : illegal_bins)
+      used.insert(used.end(), bin_it.bin_data->intervals.begin(), bin_it.bin_data->intervals.end());
+    for (auto &bin_it : ignore_bins)
+      used.insert(used.end(), bin_it.bin_data->intervals.begin(), bin_it.bin_data->intervals.end());
+    std::sort(used.begin(), used.end());
+
+    // the values between the used intervals
+    std::vector<fc4sc::interval_t<T>> values;
+    T next = std::numeric_limits<T>::min();
+    bool past_max = false;
+    for (auto &intv : used)
+    {
+      if (intv.second < next) continue;
+      if (intv.first > next)
+        values.push_back(fc4sc::interval<T>(next, static_cast<T>(intv.first - 1)));
+      if (intv.second == std::numeric_limits<T>::max()) {
+        past_max = true;
+        break;
+      }
+      next = static_cast<T>(intv.second + 1);
+    }
+    if (!past_max)
+      values.push_back(fc4sc::interval<T>(next, std::numeric_limits<T>::max()));
+
+    for (auto &bin_it : default_bins)
+      bin_it.set_values(values);
+  }
 
   /*! Indices of the transition bins in bins */
   std::vector<size_t> trans_bins;
@@ -468,6 +522,10 @@ private:
       return;
     }
 
+    // Sample the default bins, which hold the values in no other bin
+    for (auto &bin_it : this->default_bins)
+      bin_it.sample_default(cvp_val);
+
     // 4) Sample regular bins    
     range_it  = get_interval_bs(this->regular_interval_map,cvp_val);
     if(range_it != this->regular_interval_map.end()) {
@@ -534,6 +592,15 @@ private:
   }
 
   /*!
+   *  \brief Constructor that registers a new default bin
+   */
+  template <typename... Args>
+  coverpoint(default_bin<T> n, Args... args) : coverpoint(args...)
+  {
+    n.add_to_cvp(*this);
+  }
+
+  /*!
    *  \brief Constructor that registers a new ignore bin
    */
   template <typename... Args>
@@ -573,6 +640,7 @@ public:
     this->bins = std::move(rh.bins);
     this->ignore_bins = std::move(rh.ignore_bins);
     this->illegal_bins = std::move(rh.illegal_bins);
+    this->default_bins = std::move(rh.default_bins);
     this->regular_interval_map = std::move(rh.regular_interval_map);
     this->illegal_interval_map = std::move(rh.illegal_interval_map);
     this->ignore_interval_map = std::move(rh.ignore_interval_map);
@@ -586,9 +654,11 @@ public:
     this->cvp_data->bins_data = rh.cvp_data->bins_data;
     this->cvp_data->illegal_bins_data = rh.cvp_data->illegal_bins_data;
     this->cvp_data->ignore_bins_data = rh.cvp_data->ignore_bins_data;
+    this->cvp_data->default_bins_data = rh.cvp_data->default_bins_data;
     rh.cvp_data->bins_data.clear();
     rh.cvp_data->illegal_bins_data.clear();
     rh.cvp_data->ignore_bins_data.clear();
+    rh.cvp_data->default_bins_data.clear();
     delete rh.cvp_data;
     return *this;
   }
@@ -857,6 +927,19 @@ public:
   {
     std::vector<bin_base*> bin_base_vec;
     for (auto &bin_it : ignore_bins)
+    {
+      bin_base_vec.push_back(&bin_it);
+    }
+    return bin_base_vec;
+  }
+
+  /*!
+   * \brief Returns a vector of pointers to base_bin for introspection
+   */
+  std::vector<bin_base*> get_default_bins_base()
+  {
+    std::vector<bin_base*> bin_base_vec;
+    for (auto &bin_it : default_bins)
     {
       bin_base_vec.push_back(&bin_it);
     }

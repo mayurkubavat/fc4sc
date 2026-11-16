@@ -61,6 +61,8 @@ namespace fc4sc {
 using fc4sc::interval;
 using fc4sc::bin;
 using fc4sc::bin_array;
+using fc4sc::default_bin;
+using fc4sc::default_bin_array;
 using fc4sc::binsof;
 using fc4sc::ignore_bin;
 using fc4sc::illegal_bin;
