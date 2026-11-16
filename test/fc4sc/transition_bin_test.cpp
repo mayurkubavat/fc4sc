@@ -435,6 +435,18 @@ public:
   };
 };
 
+class transition_lengths_cvg : public covergroup {
+public:
+  CG_CONS(transition_lengths_cvg) {};
+
+  int x = 0;
+
+  // bins b = (1 [*1:1400] => 2); 1400 sequences of 1400 lengths
+  COVERPOINT(int, cvp, x) {
+    transition_bin<int>("b", trans<int>(fc4sc::repeat(1, 1, 1400), 2))
+  };
+};
+
 // Returns the time to sample n alternating values
 template <typename CVG>
 static double sample_time(CVG& cvg, int n) {
@@ -458,6 +470,19 @@ TEST(transition_bin, sampling_does_not_scale_with_sequences) {
     EXPECT_EQ(few.cvp.get_bin_hit_count(0), uint64_t(n - 1));
     // a bin with 65536 sequences samples about as fast as one with 4
     EXPECT_LT(many_time, 20 * few_time + 0.01);
+
+    // and so does a bin with sequences of many lengths
+    transition_lengths_cvg lengths("lengths", __FILE__, __LINE__, cntxt);
+    auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < n; ++i) {
+      lengths.x = 1;
+      lengths.sample();
+    }
+    double lengths_time = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    EXPECT_LT(lengths_time, 20 * few_time + 0.01);
+    lengths.x = 2;
+    lengths.sample();
+    EXPECT_EQ(lengths.cvp.get_bin_hit_count(0), 1u);
   }
   fc4sc::global::delete_context(cntxt);
 }

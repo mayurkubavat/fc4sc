@@ -905,24 +905,32 @@ public:
     return sequences_int;
   }
 
-  /*! Index of each sequence, by its values */
-  std::map<std::vector<T>, size_t> index;
+  /*!
+   * Trie of the sequences, read from their last value to their first:
+   * the child of a node for a value, by the node and the value
+   */
+  std::map<std::pair<size_t, T>, size_t> trie;
 
-  /*! The lengths of the sequences, shortest first */
-  std::vector<size_t> lengths;
+  /*! Index of the sequence which ends at a node of the trie, or -1 */
+  std::vector<int> trie_sequence;
 
-  /*! Builds the index of the sequences, after they are all added */
+  /*! Builds the trie of the sequences, after they are all added */
   void build_index()
   {
-    index.clear();
-    lengths.clear();
+    trie.clear();
+    trie_sequence.assign(1, -1);
     for (size_t i = 0; i < sequences.size(); ++i)
     {
-      index.insert(std::make_pair(sequences[i], i));
-      lengths.push_back(sequences[i].size());
+      size_t node = 0;
+      for (auto it = sequences[i].rbegin(); it != sequences[i].rend(); ++it)
+      {
+        auto edge = trie.insert(std::make_pair(std::make_pair(node, *it), trie_sequence.size()));
+        if (edge.second) trie_sequence.push_back(-1);
+        node = edge.first->second;
+      }
+      // the first of equal sequences gets the hits
+      if (trie_sequence[node] < 0) trie_sequence[node] = static_cast<int>(i);
     }
-    std::sort(lengths.begin(), lengths.end());
-    lengths.erase(std::unique(lengths.begin(), lengths.end()), lengths.end());
   }
 
   /*!
@@ -931,19 +939,23 @@ public:
    * \param history The last sampled values, the oldest first
    * \param max_length Length of the longest sequence which may be hit
    * \returns Index of the sequence which was hit, or -1
+   *
+   * The history is read once from the newest value backwards, so the time
+   * depends on the length of the longest sequence only.
    */
   int sample(const std::deque<T>& history, size_t max_length)
   {
     max_length = std::min(max_length, history.size());
-    std::vector<T> last;
-    for (auto length : lengths)
+    size_t node = 0;
+    for (size_t length = 1; length <= max_length; ++length)
     {
-      if (length > max_length) break;
-      last.assign(history.end() - length, history.end());
-      auto it = index.find(last);
-      if (it != index.end()) {
-        this->interval_hits[it->second]++;
-        return static_cast<int>(it->second);
+      auto edge = trie.find(std::make_pair(node, history[history.size() - length]));
+      if (edge == trie.end()) break;
+      node = edge->second;
+      const int seq = trie_sequence[node];
+      if (seq >= 0) {
+        this->interval_hits[seq]++;
+        return seq;
       }
     }
     return -1;
