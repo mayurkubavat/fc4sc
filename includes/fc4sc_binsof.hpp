@@ -167,8 +167,19 @@ class binsof : public select_expression
           for (auto value : seq)
             selected[i] = selected[i] || has_value(value, value);
     }
-    if (!found)
+    if (!found) {
+      // as in SystemVerilog, the ignore and illegal bins of a coverpoint
+      // are not in its crosses
+      for (auto &bin : cvp->ignore_bins)
+        if (bin.bin_data->name == bin_name)
+          throw std::invalid_argument("binsof: " + bin_name + " is an ignore bin of coverpoint " +
+                                      cvp->name() + " and cannot be selected");
+      for (auto &bin : cvp->illegal_bins)
+        if (bin.bin_data->name == bin_name)
+          throw std::invalid_argument("binsof: " + bin_name + " is an illegal bin of coverpoint " +
+                                      cvp->name() + " and cannot be selected");
       throw std::invalid_argument("binsof: no bin " + bin_name + " in coverpoint " + cvp->name());
+    }
     return selected;
   }
 
@@ -248,8 +259,11 @@ public:
  * as an illegal bin of a coverpoint does. A user defined bin is hit once
  * by a sample which hits any of its products, and a bin which has no
  * products is not counted in the coverage. The UCIS XML file has a
- * crossBin for each user defined bin, with its name and type, and the
- * index -1 for each coverpoint, as it has no single product of bins.
+ * crossBin for each user defined bin which has products, with its name,
+ * and the index -1 for each coverpoint, as it has no single product of
+ * bins. The ignore and illegal bins are not written, as they are not
+ * counted in the coverage, and readers of UCIS files may not look at the
+ * type of a crossBin.
  */
 class cross_bin
 {

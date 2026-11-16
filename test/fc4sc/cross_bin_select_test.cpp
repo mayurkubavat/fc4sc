@@ -227,11 +227,29 @@ public:
     cross_bin("b", binsof<int>(&cvp_b)));
 };
 
+class cross_select_ignore_bin : public covergroup {
+public:
+  CG_CONS(cross_select_ignore_bin) {};
+  int a = 0;
+  COVERPOINT(int, cvp_a, a) { bin<int>("one", 1), ignore_bin<int>("ign", 2) };
+  cross<int> only_a = cross<int>(this, "only_a", &cvp_a,
+    cross_bin("i", binsof<int>(&cvp_a, "ign")));
+};
+
 TEST(cross_bin_select, bad_select) {
   auto cntxt = fc4sc::global::create_new_context();
   // a bin which is not in the coverpoint, and a coverpoint not in the cross
   EXPECT_THROW(cross_select_bad_bin("bad_bin", __FILE__, __LINE__, cntxt), std::invalid_argument);
   EXPECT_THROW(cross_select_other_cvp("other_cvp", __FILE__, __LINE__, cntxt), std::invalid_argument);
+  // an ignore bin of a coverpoint is not in the cross
+  try {
+    cross_select_ignore_bin("ignore_bin", __FILE__, __LINE__, cntxt);
+    ADD_FAILURE() << "no exception";
+  }
+  catch (std::invalid_argument &e) {
+    EXPECT_EQ(std::string(e.what()),
+              "binsof: ign is an ignore bin of coverpoint cvp_a and cannot be selected");
+  }
   fc4sc::global::delete_context(cntxt);
 }
 
@@ -291,12 +309,12 @@ TEST(cross_bin_select, written_to_ucis_xml) {
   EXPECT_EQ(cross_bin("&lt;4,0&gt;"), "");
   EXPECT_EQ(cross_bin("&lt;3,0&gt;"), "");
 
-  // the user defined bins, with their types
+  // the user defined bins, without the ignore and illegal bins, which are
+  // not counted in the coverage
   const std::string zero_any = cross_bin("zero_any");
   EXPECT_NE(zero_any.find("coverageCount=\"1\""), std::string::npos);
   EXPECT_EQ(zero_any.find("type="), std::string::npos);
-  EXPECT_NE(cross_bin("ign").find("type=\"ignore\""), std::string::npos);
-  EXPECT_NE(cross_bin("ign").find("coverageCount=\"1\""), std::string::npos);
-  EXPECT_NE(cross_bin("bad").find("type=\"illegal\""), std::string::npos);
   EXPECT_NE(cross_bin("low_y").find("coverageCount=\"0\""), std::string::npos);
+  EXPECT_EQ(cross_bin("ign"), "");
+  EXPECT_EQ(cross_bin("bad"), "");
 }

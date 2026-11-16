@@ -490,22 +490,20 @@ public:
         write_bin(it->first, it->second);
     }
 
-    // The user defined bins, ignore bins and illegal bins, by name. They
-    // have the index -1, for no bin, for every crossed coverpoint, as they
-    // have no single product of bins. A user defined bin without products
-    // is not counted in the coverage, so it is not written.
+    // The user defined bins, by name. They have the index -1, for no bin,
+    // for every crossed coverpoint, as they have no single product of bins.
+    // The ignore and illegal bins, and a user defined bin without products,
+    // are not counted in the coverage, so they are not written: readers of
+    // UCIS files may not look at the type of a crossBin, and would count
+    // them.
     for (auto &bin : base.user_bins)
     {
-      if (bin.bin_type == fc4sc::bin_t::default_ && bin.size == 0)
+      if (bin.bin_type != fc4sc::bin_t::default_ || bin.size == 0)
         continue;
       bins_written++;
       stream << "<crossBin \n";
       stream << "name=\"" << escape_xml_chars(bin.name) << "\"  \n";
       stream << "key=\"" << get_unique_key() << "\" \n";
-      if (bin.bin_type == fc4sc::bin_t::ignore_)
-        stream << "type=\"ignore\" \n";
-      else if (bin.bin_type == fc4sc::bin_t::illegal_)
-        stream << "type=\"illegal\" \n";
       stream << "> \n";
 
       for (size_t i = 0; i < sizes.size(); i++)
