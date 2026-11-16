@@ -69,8 +69,9 @@ public:
     stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
            << "\n";
     stream << "<UCIS xmlns=\"UCIS\" xmlns:ucis=\"http://www.w3.org/2001/XMLSchema-instance\" ucisVersion=\"1.0\" ";
+    const char* writer = getenv("USER");
     stream << " writtenBy=\""
-           << getenv("USER")
+           << escape_xml_chars(writer ? writer : "")
            << "\"\n";
 
     std::time_t cur_time = std::time(0);
@@ -89,7 +90,7 @@ public:
     {
       stream << "<sourceFiles ";
       stream << " fileName=\""
-	     << fname_it.second
+	     << escape_xml_chars(fname_it.second)
 	     << "\"";
       stream << " id=\""
              << fname_it.first
@@ -149,8 +150,9 @@ public:
 	   << time_now->tm_sec/10 << time_now->tm_sec%10
            << "\" \n";
       
+    const char* user = getenv("USER");
     stream << "userName=\""
-           << getenv("USER")
+           << escape_xml_chars(user ? user : "")
            << "\" \n";
     /*
     stream << "cost=\""
@@ -199,10 +201,10 @@ public:
   {
     stream << "<instanceCoverages ";
     stream << "name=\""
-           << base.name
+           << escape_xml_chars(base.name)
            << "\" \n";
     stream << "moduleName=\""
-           << base.type_data->type_name
+           << escape_xml_chars(base.type_data->type_name)
     	   << "\" \n";
     stream << "key=\"" << get_unique_key() << "\" \n";
     stream << "instanceId=\"" << base.instance_id << "\" \n";
@@ -242,7 +244,7 @@ public:
       {
         if(type_it.second[i]->enable) {
           stream << "<cgInstance ";
-          stream << "name=\"" << type_it.second[i]->name << "\" \n";
+          stream << "name=\"" << escape_xml_chars(type_it.second[i]->name) << "\" \n";
 
           stream << "key=\"" << get_unique_key() << "\" \n";
           stream << "excluded=\""
@@ -269,11 +271,11 @@ public:
       {
         if(!type_it.second[i]->enable) {
           stream << "<userAttr ";
-  	  stream << "key=\"" << type_it.second[i]->type_data->type_name << "\" \n";
+  	  stream << "key=\"" << escape_xml_chars(type_it.second[i]->type_data->type_name) << "\" \n";
           stream << "type=\"str\"\n";
 	  stream << "len=\"" << type_it.second[i]->type_data->type_name.size() << "\"\n";
 	  stream << ">\n";
-	  stream << type_it.second[i]->type_data->type_name;
+	  stream << escape_xml_chars(type_it.second[i]->type_data->type_name);
 	  stream << "</userAttr>\n";
 	}
       }
@@ -293,7 +295,7 @@ public:
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
     stream << "goal=\"" << inst.goal << "\" ";
-    stream << "comment=\"" << inst.comment << "\" ";
+    stream << "comment=\"" << escape_xml_chars(inst.comment) << "\" ";
     stream << "at_least=\"" << inst.at_least << "\" ";
     stream << "auto_bin_max=\"" << inst.auto_bin_max << "\" ";
     stream << "detect_overlap=\"" << inst.detect_overlap << "\" ";
@@ -314,7 +316,7 @@ public:
 
     stream << "<cgId cgName=\"" << escape_xml_chars(base.type_data->type_name) << "\" ";
     stream << "moduleName=\""
-           <<  base.type_data->scp_type_name
+           <<  escape_xml_chars(base.type_data->scp_type_name)
            << "\">\n";
 
     stream << "<cginstSourceId file=\""
@@ -352,7 +354,7 @@ public:
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
     stream << "goal=\"" << inst.goal << "\" ";
-    stream << "comment=\"" << inst.comment << "\" ";
+    stream << "comment=\"" << escape_xml_chars(inst.comment) << "\" ";
     stream << "at_least=\"" << inst.at_least << "\" ";
     stream << "auto_bin_max=\"" << inst.auto_bin_max << "\" ";
     stream << "detect_overlap=\"" << inst.detect_overlap << "\" ";
@@ -381,7 +383,7 @@ public:
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
     stream << "goal=\"" << inst.goal << "\" ";
-    stream << "comment=\"" << inst.comment << "\" ";
+    stream << "comment=\"" << escape_xml_chars(inst.comment) << "\" ";
     stream << "at_least=\"" << inst.at_least << "\" ";
     stream << "cross_num_print_missing=\"" << inst.cross_num_print_missing << "\" ";
     stream << "/>\n";
@@ -389,7 +391,7 @@ public:
 
     for (auto &cvp : base.cross_cvps)
     {
-      stream << "<crossExpr>" << cvp->name << "</crossExpr> \n";
+      stream << "<crossExpr>" << escape_xml_chars(cvp->name) << "</crossExpr> \n";
     }
 
     // Write the bins of the cross which were hit, and the missing bins
@@ -612,7 +614,8 @@ public:
   }
 
   /*!
-   *  \brief Function which returns a string where all XML special characters are escaped.
+   *  \brief Function which returns a string where all XML special characters are escaped,
+   *  and the control characters which XML 1.0 does not allow are replaced with '?'.
    *
    *  \param in The input string
    */
@@ -626,7 +629,17 @@ public:
         case '&': out += "&amp;"; break;
         case '\"': out += "&quot;"; break;
         case '\'': out += "&apos;"; break;
-        default: out += in[idx];
+        // white space is written as references, so that it is kept in
+        // attribute values
+        case '\t': out += "&#9;"; break;
+        case '\n': out += "&#10;"; break;
+        case '\r': out += "&#13;"; break;
+        default:
+          // the other control characters are not allowed in XML 1.0
+          if (static_cast<unsigned char>(in[idx]) < 0x20)
+            out += '?';
+          else
+            out += in[idx];
       }
     }
     return out;
