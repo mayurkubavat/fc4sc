@@ -147,7 +147,10 @@ struct cross_option // cross option declaration
   /*! Minimum of hits for each bin */
   uint at_least;
 
-  /*! !UNIPLEMENTED! Number of missing bins in crosses to be printed */
+  /*! Number of missing (never hit) bins written to the coverage database
+   *  in addition to the hit bins. Define FC4SC_SAVE_ALL_CROSS_BINS to write
+   *  every missing bin; like FC4SC_NO_THROW, it changes inline code, so it
+   *  must be defined for every file of a program (on the command line). */
   uint cross_num_print_missing;
 
   /*!
