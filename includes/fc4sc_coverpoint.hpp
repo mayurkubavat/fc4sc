@@ -213,7 +213,7 @@ private:
   /*! Sampling switch */
   bool collect = true;
 
-  /*! Whether option.detect_overlap has been looked at */
+  /*! Whether the bins have been checked for option.detect_overlap */
   bool overlap_checked = false;
 
   /*!
@@ -385,12 +385,15 @@ private:
 #ifdef FC4SC_DISABLE_SAMPLING
     return;
 #endif
-    if (!collect) return;
-    if (!overlap_checked) {
+    // The options are plain fields which are set after the bins are
+    // defined, so option.detect_overlap is looked at when sampling: the
+    // check is made once, on the first sample after the option is set,
+    // even if sampling is stopped.
+    if (!overlap_checked && cvp_data->option.detect_overlap) {
       overlap_checked = true;
-      if (cvp_data->option.detect_overlap)
-        report_overlapping_bins();
+      report_overlapping_bins();
     }
+    if (!collect) return;
     this->last_sample_success = false;
 
     // 1) Search if the value is in the ignore bins

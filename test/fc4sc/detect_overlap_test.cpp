@@ -101,3 +101,37 @@ TEST(detect_overlap, silent_by_default) {
 
   fc4sc::global::delete_context(cntxt);
 }
+
+TEST(detect_overlap, warns_when_set_after_sampling) {
+  auto cntxt = fc4sc::global::create_new_context();
+  overlap_cg cg("cg", __FILE__, __LINE__, cntxt);
+
+  ::testing::internal::CaptureStderr();
+  cg.sample(1);
+  cg.cvp.option().detect_overlap = true;
+  cg.sample(1);
+  cg.sample(1);
+  std::string err = ::testing::internal::GetCapturedStderr();
+
+  // checked on the first sample after the option is set, and only once
+  EXPECT_NE(err.find("Warning"), std::string::npos) << err;
+  EXPECT_EQ(err.find("Warning"), err.rfind("Warning")) << err;
+
+  fc4sc::global::delete_context(cntxt);
+}
+
+TEST(detect_overlap, warns_when_stopped) {
+  auto cntxt = fc4sc::global::create_new_context();
+  overlap_cg cg("cg", __FILE__, __LINE__, cntxt);
+  cg.cvp.option().detect_overlap = true;
+  cg.stop();
+
+  ::testing::internal::CaptureStderr();
+  cg.sample(1);
+  std::string err = ::testing::internal::GetCapturedStderr();
+
+  EXPECT_NE(err.find("overlap"), std::string::npos) << err;
+  EXPECT_EQ(cg.cvp.get_bin_hit_count(0) + cg.cvp.get_bin_hit_count(1), 0u);
+
+  fc4sc::global::delete_context(cntxt);
+}

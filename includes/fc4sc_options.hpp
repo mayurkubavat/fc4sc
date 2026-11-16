@@ -109,8 +109,10 @@ struct cvp_option
   /*! !UNIPLEMENTED! Max number of generated bins */
   uint auto_bin_max;
 
-  /*! Issue a warning, on the first sample, for each pair of regular bins
-   *  of the coverpoint which have values in common */
+  /*! Issue a warning for each pair of regular bins of the coverpoint which
+   *  have values in common. The check is made once, on the first sample of
+   *  the coverpoint after the option is set: the options are set after the
+   *  bins are defined, and setting a field cannot start the check. */
   bool detect_overlap;
 
   /*!
