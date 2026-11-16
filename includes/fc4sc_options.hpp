@@ -44,25 +44,25 @@
 struct cvg_option
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
 
   /*! Minimum of hits for each bin */
-  uint at_least;
+  unsigned int at_least;
 
   /*! !UNIPLEMENTED! Max number of generated bins */
-  uint auto_bin_max;
+  unsigned int auto_bin_max;
 
   /*! !UNIPLEMENTED! Issue warning if bins overlap in cvp */
   bool detect_overlap;
 
   /*! !UNIPLEMENTED! Number of missing bins in crosses to be printed */
-  uint cross_num_print_missing;
+  unsigned int cross_num_print_missing;
 
   /*! !UNIPLEMENTED! Collect coverage per instance */
   bool per_instance;
@@ -95,19 +95,19 @@ struct cvg_option
 struct cvp_option
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
 
   /*! Minimum of hits for each bin */
-  uint at_least;
+  unsigned int at_least;
 
   /*! !UNIPLEMENTED! Max number of generated bins */
-  uint auto_bin_max;
+  unsigned int auto_bin_max;
 
   /*! Issue a warning for each pair of regular bins of the coverpoint which
    *  have values in common. The check is made once, on the first sample of
@@ -136,22 +136,22 @@ struct cvp_option
 struct cross_option // cross option declaration
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
 
   /*! Minimum of hits for each bin */
-  uint at_least;
+  unsigned int at_least;
 
   /*! Number of missing (never hit) bins written to the coverage database
    *  in addition to the hit bins. Define FC4SC_SAVE_ALL_CROSS_BINS to write
    *  every missing bin; like FC4SC_NO_THROW, it changes inline code, so it
    *  must be defined for every file of a program (on the command line). */
-  uint cross_num_print_missing;
+  unsigned int cross_num_print_missing;
 
   /*!
    * \brief Sets all values to default
@@ -173,10 +173,10 @@ struct cross_option // cross option declaration
 struct cvg_type_option // covergroup type_option declaration
 {
   /*! Weight of instance when computing coverage */
-  uint weight;
+  unsigned int weight;
 
   /*! Target coverage percentage */
-  uint goal;
+  unsigned int goal;
 
   /*! Comment for this coverage */
   std::string comment;
