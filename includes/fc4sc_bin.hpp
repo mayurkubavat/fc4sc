@@ -1195,12 +1195,27 @@ public:
   /*! Hit count of each value, for a bin array */
   std::map<T, uint64_t> value_hits;
 
-  std::map<int, uint64_t> get_value_hits_to_int() const
+  /*! Writes a value in decimal, a char type as a number */
+  static std::string to_decimal(T value)
   {
-    std::map<int, uint64_t> hits;
-    for (auto &hit : value_hits)
-      hits[static_cast<int>(hit.first)] += hit.second;
-    return hits;
+    typedef typename std::conditional<std::is_signed<T>::value, long long, unsigned long long>::type wide_t;
+    return std::to_string(static_cast<wide_t>(value));
+  }
+
+  std::vector<std::tuple<std::string, std::string, uint64_t>> get_default_ranges() const
+  {
+    std::vector<std::tuple<std::string, std::string, uint64_t>> ranges;
+    if (array) {
+      for (auto &hit : value_hits)
+        ranges.push_back(std::make_tuple(to_decimal(hit.first), to_decimal(hit.first), hit.second));
+    }
+    else {
+      for (size_t i = 0; i < this->intervals.size(); ++i)
+        ranges.push_back(std::make_tuple(to_decimal(this->intervals[i].first),
+                                         to_decimal(this->intervals[i].second),
+                                         this->interval_hits[i]));
+    }
+    return ranges;
   }
 
   bool is_value_array() const

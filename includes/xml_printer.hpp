@@ -450,36 +450,38 @@ public:
    */
   void write_default_bin(fc4sc::bin_base_data_model& base)
   {
+    auto ranges = base.get_default_ranges();
     if (base.is_value_array()) {
-      for (auto &hit : base.get_value_hits_to_int())
-      {
-        write_ignore_bin(base.get_name() + "[" + std::to_string(hit.first) + "]",
-                         std::vector<fc4sc::interval_t<int>>(1, fc4sc::interval(hit.first, hit.first)),
-                         std::vector<uint64_t>(1, hit.second));
-      }
+      // the values may not fit in an int, so the names use the values
+      // written in decimal, which are unique
+      for (auto &range : ranges)
+        write_ignore_bin(base.get_name() + "[" + std::get<0>(range) + "]",
+                         std::vector<std::tuple<std::string, std::string, uint64_t>>(1, range));
     }
-    else if (!base.get_intervals_to_int().empty()) {
-      write_ignore_bin(base.get_name(), base.get_intervals_to_int(), base.get_interval_hits());
+    else if (!ranges.empty()) {
+      write_ignore_bin(base.get_name(), ranges);
     }
   }
 
   /*!
    * \brief Writes an ignore bin of a coverpoint
+   * \param name Name of the bin
+   * \param ranges Its ranges, from and to in decimal, with their hit counts
    */
-  void write_ignore_bin(const std::string& name, const std::vector<fc4sc::interval_t<int>>& intervals,
-                        const std::vector<uint64_t>& hits)
+  void write_ignore_bin(const std::string& name,
+                        const std::vector<std::tuple<std::string, std::string, uint64_t>>& ranges)
   {
     stream << "<coverpointBin name=\"" << escape_xml_chars(name) << "\" \n";
     stream << "key=\"" << get_unique_key() << "\" \n";
     stream << "type=\"ignore\" >\n";
-    for (size_t i = 0; i < intervals.size(); ++i)
+    for (auto &range : ranges)
     {
       stream << "<range \n"
-             << "from=\"" << intervals[i].first << "\" \n"
-             << "to =\"" << intervals[i].second << "\"\n"
+             << "from=\"" << std::get<0>(range) << "\" \n"
+             << "to =\"" << std::get<1>(range) << "\"\n"
              << ">\n";
       stream << "<contents "
-             << "coverageCount=\"" << hits[i] << "\">";
+             << "coverageCount=\"" << std::get<2>(range) << "\">";
       stream << "</contents>\n";
       stream << "</range>\n\n";
     }

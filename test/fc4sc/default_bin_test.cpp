@@ -196,3 +196,52 @@ TEST(default_bin, written_to_ucis_xml) {
   EXPECT_NE(xml.find("<coverpointBin name=\"rest[5]\""), std::string::npos);
   EXPECT_EQ(xml.find("<coverpointBin name=\"rest[4]\""), std::string::npos);
 }
+
+class default_bin_wide_cvg : public covergroup {
+public:
+  CG_CONS(default_bin_wide_cvg) {};
+
+  unsigned int u = 0;
+  uint64_t w = 0;
+
+  COVERPOINT(unsigned int, cvp_u, u) {
+    bin<unsigned int>("low", interval(0u, 7u)),
+    default_bin<unsigned int>("others")
+  };
+
+  COVERPOINT(uint64_t, cvp_w, w) {
+    bin<uint64_t>("low", interval<uint64_t>(0, 7)),
+    default_bin_array<uint64_t>("rest")
+  };
+};
+
+// The values of the default bins of unsigned and 64-bit coverpoints do not
+// fit in an int, and are written as they are
+TEST(default_bin, wide_types_written_to_ucis_xml) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    default_bin_wide_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    cvg.u = 4000000000u;
+    // two values with the same low 32 bits
+    cvg.w = 0x100000008ull;
+    cvg.sample();
+    cvg.w = 0x200000008ull;
+    cvg.sample();
+    xml_printer::coverage_save("default_bin_wide_test.xml", cntxt);
+  }
+  fc4sc::global::delete_context(cntxt);
+
+  std::ifstream file("default_bin_wide_test.xml");
+  std::stringstream content;
+  content << file.rdbuf();
+  const std::string xml = content.str();
+
+  size_t pos = xml.find("<coverpointBin name=\"others\"");
+  ASSERT_NE(pos, std::string::npos);
+  const std::string others = xml.substr(pos, xml.find("</coverpointBin>", pos) - pos);
+  EXPECT_NE(others.find("from=\"8\" \nto =\"4294967295\""), std::string::npos);
+  EXPECT_NE(others.find("coverageCount=\"2\""), std::string::npos);
+
+  EXPECT_NE(xml.find("<coverpointBin name=\"rest[4294967304]\""), std::string::npos);
+  EXPECT_NE(xml.find("<coverpointBin name=\"rest[8589934600]\""), std::string::npos);
+}

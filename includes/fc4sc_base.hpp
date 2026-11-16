@@ -304,13 +304,15 @@ public:
   }
 
   /*!
-   * Get the hit count of each value of a default bin array, as the
-   * SystemVerilog "bins b[] = default;", in type int. The array has a bin
-   * for each value hit. Empty for other bins.
+   * Get the value ranges of a default bin with their hit counts, the
+   * values written in decimal, as they may not fit in an int. For a default
+   * bin array, as the SystemVerilog "bins b[] = default;", which has a bin
+   * for each value hit, a range of one value for each value hit. Empty for
+   * other bins.
    */
-  virtual std::map<int, uint64_t> get_value_hits_to_int() const
+  virtual std::vector<std::tuple<std::string, std::string, uint64_t>> get_default_ranges() const
   {
-    return std::map<int, uint64_t>();
+    return std::vector<std::tuple<std::string, std::string, uint64_t>>();
   }
 
   /*! Whether this is a default bin array, with a bin for each value hit */
