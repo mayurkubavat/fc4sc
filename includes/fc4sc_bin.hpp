@@ -538,6 +538,7 @@ public:
     cvp.insert_intervals(cvp.regular_interval_map,*this,cvp.bins.size());
     cvp.bins.push_back(*this);
     cvp.cvp_data->bins_data.push_back(this->bin_data);
+    cvp.update_default_bins();
   }
 
   /*!
@@ -687,6 +688,7 @@ public:
     cvp.insert_intervals(cvp.illegal_interval_map,*this,cvp.illegal_bins.size());
     cvp.illegal_bins.push_back(*this);
     cvp.cvp_data->illegal_bins_data.push_back(this->bin_data);
+    cvp.update_default_bins();
   }
 
 };
@@ -721,6 +723,7 @@ public:
     cvp.insert_intervals(cvp.ignore_interval_map,*this,cvp.ignore_bins.size());
     cvp.ignore_bins.push_back(*this);
     cvp.cvp_data->ignore_bins_data.push_back(this->bin_data);
+    cvp.update_default_bins();
   }
 
 };
@@ -1412,6 +1415,162 @@ public:
   virtual ~ignore_transition_bin() = default;
 };
 
+/*!
+ * \brief Defines a class for the data model of default bins
+ * \tparam T Type of values in this bin
+ *
+ *   The intervals of a default bin are the values which are in no other
+ * bin of its coverpoint. interval_hits holds their hit counts.
+ */
+template <class T>
+class default_bin_data_model : public bin_data_model<T>
+{
+public:
+
+  /*! Whether the bin has a bin for each value, as "bins b[] = default;" */
+  bool array = false;
+
+  /*! Hit count of each value, for a bin array */
+  std::map<T, uint64_t> value_hits;
+
+  /*! Writes a value in decimal, a char type as a number */
+  static std::string to_decimal(T value)
+  {
+    typedef typename std::conditional<std::is_signed<T>::value, long long, unsigned long long>::type wide_t;
+    return std::to_string(static_cast<wide_t>(value));
+  }
+
+  std::vector<std::tuple<std::string, std::string, uint64_t>> get_default_ranges() const
+  {
+    std::vector<std::tuple<std::string, std::string, uint64_t>> ranges;
+    if (array) {
+      for (auto &hit : value_hits)
+        ranges.push_back(std::make_tuple(to_decimal(hit.first), to_decimal(hit.first), hit.second));
+    }
+    else {
+      for (size_t i = 0; i < this->intervals.size(); ++i)
+        ranges.push_back(std::make_tuple(to_decimal(this->intervals[i].first),
+                                         to_decimal(this->intervals[i].second),
+                                         this->interval_hits[i]));
+    }
+    return ranges;
+  }
+
+  bool is_value_array() const
+  {
+    return array;
+  }
+};
+
+/*!
+ * \brief Defines a class for default bins
+ * \tparam T Type of values in this bin
+ *
+ *   A default bin holds the values of its coverpoint which are in no other
+ * bin: no bin, illegal bin or ignore bin. The SystemVerilog
+ * "bins others = default;" is written default_bin<int>("others"). As in
+ * SystemVerilog, a default bin is not counted in the coverage of its
+ * coverpoint, and a cross of the coverpoint does not see it: a sample
+ * which only hits a default bin is a miss of the cross. Transition bins
+ * do not change the values of a default bin. The UCIS XML file has the
+ * bin as an ignore bin, so that readers of the file do not count it.
+ */
+template <class T>
+class default_bin : public bin<T>
+{
+  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  friend class coverpoint<T>;
+
+protected:
+
+  default_bin() = delete;
+
+  default_bin_data_model<T>* default_data()
+  {
+    return static_cast<default_bin_data_model<T>*>(this->bin_data);
+  }
+
+  /*!
+   * \brief Sets the values of this bin
+   * \param values The values which are in no other bin, as sorted and
+   * disjoint intervals
+   */
+  void set_values(const std::vector<interval_t<T>>& values)
+  {
+    this->bin_data->intervals = values;
+    this->bin_data->interval_hits.assign(values.size(), 0);
+    default_data()->value_hits.clear();
+  }
+
+  /*!
+   * \brief Samples a value, which hits the bin if it is in no other bin
+   * \param val Current sampled value
+   */
+  void sample_default(const T &val)
+  {
+    auto& intervals = this->bin_data->intervals;
+    auto it = std::upper_bound(intervals.begin(), intervals.end(), val,
+      [](const T& v, const interval_t<T>& intv) { return v < intv.first; });
+    if (it == intervals.begin()) return;
+    --it;
+    if (val > it->second) return;
+    this->bin_data->interval_hits[it - intervals.begin()]++;
+    if (default_data()->array)
+      default_data()->value_hits[val]++;
+  }
+
+public:
+
+  /*!
+   *  \brief Takes the bin name
+   *  \param bin_name Name of the bin
+   */
+  explicit default_bin(const std::string &bin_name) : bin<T>(bin_name, std::vector<interval_t<T>>())
+  {
+    auto data = new default_bin_data_model<T>;
+    data->name = bin_name;
+    data->bin_type = bin_t::default_bin_;
+    delete this->bin_data;
+    this->bin_data = data;
+    this->valid_data = data->valid;
+  }
+
+  virtual ~default_bin() = default;
+
+  /* Virtual function used to register this bin inside a coverpoint */
+  virtual void add_to_cvp(coverpoint<T> &cvp) override
+  {
+    if(this->valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    cvp.default_bins.push_back(*this);
+    cvp.cvp_data->default_bins_data.push_back(this->bin_data);
+    cvp.update_default_bins();
+  }
+};
+
+/*!
+ * \brief Defines a class for default bin arrays, with a bin for each value
+ * which is in no other bin, as the SystemVerilog "bins others[] = default;"
+ * \tparam T Type of values in this bin
+ *
+ *   The hit count of each value is in the value_hits of the bin data, and
+ * the UCIS XML file has a bin for each value hit, named as others[5] for
+ * the value 5.
+ */
+template <class T>
+class default_bin_array final : public default_bin<T>
+{
+public:
+  explicit default_bin_array(const std::string &bin_name) : default_bin<T>(bin_name)
+  {
+    this->default_data()->array = true;
+  }
+
+  virtual ~default_bin_array() = default;
+};
+
 /*
  * Bin wrapper class used when constructing coverpoint via the COVERPOINT macro.
  * Under the hood, the macro instantiates a coverpoint using std::initializer_list
@@ -1442,6 +1601,7 @@ public:
   bin_wrapper(illegal_bin<T>&& r) noexcept : bin_h(new illegal_bin<T>(std::move(r))) {}
   bin_wrapper(ignore_bin<T> && r) noexcept : bin_h(new ignore_bin<T> (std::move(r))) {}
   bin_wrapper(transition_bin<T> && r) noexcept : bin_h(new transition_bin<T>(std::move(r))) {}
+  bin_wrapper(default_bin<T> && r) noexcept : bin_h(new default_bin<T>(std::move(r))) {}
 };
 
 } // namespace fc4sc
