@@ -285,3 +285,27 @@ TEST(with_bin, empty_bins_are_not_added) {
   }
   fc4sc::global::delete_context(cntxt);
 }
+
+// bins b[4] = {[0:15]}; written with a braced pair, which converts both to
+// an interval and to a vector of values
+class braced_array_cvg : public covergroup {
+public:
+  CG_CONS(braced_array_cvg) {};
+
+  int x = 0;
+
+  COVERPOINT(int, cvp, x) {
+    bin_array<int>("b", 4, {0, 15})
+  };
+};
+
+TEST(with_bin, braced_pair_is_an_interval) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    braced_array_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    ASSERT_EQ(cvg.cvp.size(), 4u);
+    EXPECT_EQ(bin_intervals(cvg.cvp, 0), (intervals_t{{0, 3}}));
+    EXPECT_EQ(bin_intervals(cvg.cvp, 3), (intervals_t{{12, 15}}));
+  }
+  fc4sc::global::delete_context(cntxt);
+}

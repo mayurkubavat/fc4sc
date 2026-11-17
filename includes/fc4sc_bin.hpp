@@ -951,8 +951,13 @@ public:
    * the first values.size() / count values are in the first bin, the next ones
    * in the next bin, and the last bin has the remaining values. If there are
    * fewer values than bins, the bins left without values are not created.
+   *
+   * The values are deduced as a std::vector<T>, so that a braced pair, as in
+   * bin_array<int>("b", 4, {0, 15}), keeps selecting the interval constructor.
+   * Give the values as std::vector<T>{...}.
    */
-  explicit bin_array(const std::string &name, uint64_t count, const std::vector<T>& values) :
+  template <typename V, typename = typename std::enable_if<std::is_same<V, std::vector<T>>::value>::type>
+  explicit bin_array(const std::string &name, uint64_t count, const V& values) :
     bin_array(name, values)
   {
     if (count == 0)
