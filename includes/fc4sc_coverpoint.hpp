@@ -301,6 +301,18 @@ private:
   /*! Number of the last sampled values which are not ignored values */
   size_t trans_clean = 0;
 
+  /*! Number of samples given to the transition bins */
+  uint64_t trans_samples = 0;
+
+  /*! Checks if the coverpoint has a default sequence bin */
+  bool has_default_sequence()
+  {
+    for (auto &bin_it : default_bins)
+      if (bin_it.default_data()->sequence)
+        return true;
+    return false;
+  }
+
   /*! Sampling switch */
   bool collect = true;
 
@@ -479,20 +491,47 @@ private:
    */
   void sample_transitions(const T &cvp_val, bool ignored)
   {
-    if (trans_depth == 0) return;
+    if (trans_depth == 0 && !has_default_sequence()) return;
 
     trans_history.push_back(cvp_val);
     if (trans_history.size() > trans_depth)
       trans_history.pop_front();
     trans_clean = ignored ? 0 : std::min(trans_clean + 1, trans_depth);
+    trans_samples++;
+
+    // the transitions with goto or nonconsecutive repetitions match each
+    // sample, and no transition goes on past an ignored value. The matches
+    // of the ignored ones are not matches of the others.
+    std::vector<const trans_pattern<T>*> ignored_patterns;
+    for (auto index : this->trans_ignore_bins)
+      for (auto &pattern : static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data)->patterns)
+        ignored_patterns.push_back(&pattern);
+    const std::vector<const trans_pattern<T>*> no_patterns;
+    auto step_patterns = [&](bin_data_model<T>* bin_data, const std::vector<const trans_pattern<T>*>& exclusions) {
+      auto data = static_cast<transition_bin_data_model<T>*>(bin_data);
+      if (data->patterns.empty()) return;
+      if (ignored)
+        data->reset_patterns();
+      else
+        data->step_patterns(cvp_val, trans_samples, exclusions, trans_depth);
+    };
+    for (auto index : this->trans_ignore_bins)
+      step_patterns(this->ignore_bins[index].bin_data, no_patterns);
+    for (auto index : this->trans_illegal_bins)
+      step_patterns(this->illegal_bins[index].bin_data, ignored_patterns);
+    for (auto index : this->trans_bins)
+      step_patterns(this->bins[index].bin_data, ignored_patterns);
     if (ignored) return;
 
-    // the lengths of the last values which are an ignored sequence
+    // the lengths of the last values which are an ignored sequence, up to
+    // the longest value sequence
     std::vector<size_t> ignored_lengths;
+    bool ignored_hit = false;
     for (auto index : this->trans_ignore_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data);
-      data->sample(trans_history, trans_clean, nullptr, &ignored_lengths);
+      if (data->sample(trans_history, trans_clean, nullptr, &ignored_lengths) >= 0)
+        ignored_hit = true;
     }
 
     for (auto index : this->trans_illegal_bins)
@@ -500,16 +539,14 @@ private:
       auto data = static_cast<transition_bin_data_model<T>*>(this->illegal_bins[index].bin_data);
       int seq = data->sample(trans_history, trans_clean, &ignored_lengths);
       if (seq >= 0) {
-        std::stringstream ss;
-        for (size_t i = 0; i < data->sequences[seq].size(); ++i)
-          ss << ((i == 0) ? "" : " => ") << data->sequences[seq][i];
         illegal_bin_sample_exception e;
-        e.update_bin_info(data->name, ss.str());
+        e.update_bin_info(data->name, data->sequence_text(seq));
         e.update_cvp_info(this->cvp_data->name);
         throw e;
       }
     }
 
+    bool trans_hit = ignored_hit;
     for (auto index : this->trans_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->bins[index].bin_data);
@@ -517,8 +554,15 @@ private:
         this->last_bin_index_hit = index;
         this->last_sample_success = true;
         this->last_bins_hit.push_back(index);
+        trans_hit = true;
       }
     }
+
+    // the default sequence bins count the samples which end no transition
+    if (!trans_hit)
+      for (auto &bin_it : this->default_bins)
+        if (bin_it.default_data()->sequence)
+          bin_it.bin_data->interval_hits[0]++;
   }
 
   /*!
