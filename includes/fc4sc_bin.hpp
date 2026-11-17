@@ -248,8 +248,7 @@ protected:
    */
   void remove_interval_overlap()
   {
-    if(bin_data->intervals.empty())
-      return;
+    if (bin_data->intervals.empty()) return;
     sort(bin_data->intervals.begin(),bin_data->intervals.end(),IntervalComp());
     auto intrv_end = bin_data->intervals.begin();
     for (auto intrv = std::next(intrv_end); intrv != bin_data->intervals.end(); intrv++)
