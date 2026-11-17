@@ -73,6 +73,8 @@ public:
   /*! Adds hits to an automatically created bin */
   virtual void add_cross_bin_hits(const std::vector<size_t>& product, uint64_t count)
   {
+    // the map holds the bins which are hit
+    if (count == 0) return;
     uint64_t& hits = bins[product];
     hits = (hits > std::numeric_limits<uint64_t>::max() - count) ? std::numeric_limits<uint64_t>::max()
                                                                   : hits + count;

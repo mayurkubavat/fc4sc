@@ -382,3 +382,14 @@ TEST(coverage_db, bad_counts) {
   EXPECT_FALSE(fc4sc::ucis_db::parse_uint("18446744073709551616", v));
   EXPECT_EQ(fc4sc::ucis_db::add_saturated(18446744073709551615ull, 2), 18446744073709551615ull);
 }
+
+TEST(coverage_db, load_a_run_without_samples) {
+  { db_model m; m.save("coverage_db_no_samples.xml"); }
+  db_model m;
+  fc4sc::load_coverage_db("coverage_db_no_samples.xml", m.cntxt);
+  // a cross bin which no run hit is not added to the hit cross bins
+  auto crs = static_cast<fc4sc::cross_base_data_model*>(m.first->auto_cross.get_data());
+  EXPECT_TRUE(crs->get_cross_bins().empty());
+  crs = static_cast<fc4sc::cross_base_data_model*>(m.first->user_cross.get_data());
+  EXPECT_TRUE(crs->get_cross_bins().empty());
+}
