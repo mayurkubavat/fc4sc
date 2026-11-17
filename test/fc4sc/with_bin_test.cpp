@@ -309,3 +309,32 @@ TEST(with_bin, braced_pair_is_an_interval) {
   }
   fc4sc::global::delete_context(cntxt);
 }
+
+class zero_count_cvg : public covergroup {
+public:
+  CG_CONS(zero_count_cvg) {};
+
+  int x = 0;
+
+  COVERPOINT(int, cvp, x) {
+    bin_array<int>("b", 0, interval(0, 15)).with(is_even)
+  };
+};
+
+class zero_count_plain_cvg : public covergroup {
+public:
+  CG_CONS(zero_count_plain_cvg) {};
+
+  int x = 0;
+
+  COVERPOINT(int, cvp, x) {
+    bin_array<int>("b", 0, interval(0, 15))
+  };
+};
+
+TEST(with_bin, zero_bins_in_array) {
+  auto cntxt = fc4sc::global::create_new_context();
+  EXPECT_THROW(zero_count_cvg("with", __FILE__, __LINE__, cntxt), std::invalid_argument);
+  EXPECT_THROW(zero_count_plain_cvg("plain", __FILE__, __LINE__, cntxt), std::invalid_argument);
+  fc4sc::global::delete_context(cntxt);
+}

@@ -1003,6 +1003,8 @@ public:
   /* Virtual function used to register this bin inside a coverpoint */
   virtual void add_to_cvp(coverpoint<T> &cvp) override
   {
+    if (!this->sparse && this->count == 0)
+      throw std::invalid_argument("Bin array \"" + this->bin_data->name + "\" needs at least one bin");
     if (this->distribute) {
       // the values, one in each interval, distributed among count bins
       auto& values = this->bin_data->intervals;
