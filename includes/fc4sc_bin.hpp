@@ -248,12 +248,16 @@ protected:
    */
   void remove_interval_overlap()
   {
+    if(bin_data->intervals.empty())
+      return;
     sort(bin_data->intervals.begin(),bin_data->intervals.end(),IntervalComp());
     auto intrv_end = bin_data->intervals.begin();
     for (auto intrv = std::next(intrv_end); intrv != bin_data->intervals.end(); intrv++)
     {
       if(intrv_end->second >= intrv->first) {
-        intrv_end->second = intrv->second;
+        // an interval inside the one before it does not shorten that one
+        if(intrv->second > intrv_end->second)
+          intrv_end->second = intrv->second;
 	std::cerr << "Warning: Merging overlapping intervals "
 	          << "("  << intrv_end->first << "," << intrv_end->second << ")"
 		  << " and "
