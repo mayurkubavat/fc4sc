@@ -705,8 +705,47 @@ public:
   }
 
   /*!
+   *  \brief Returns the length of the UTF-8 encoded character which starts
+   *  at a byte of a string, or 0 if the bytes there are not a character
+   *  which XML 1.0 allows, encoded as UTF-8 allows
+   *
+   *  \param in The string
+   *  \param idx Index of the first byte, which is not an ASCII character
+   */
+  static size_t utf8_char_length(const std::string &in, std::string::size_type idx) {
+    const unsigned char lead = static_cast<unsigned char>(in[idx]);
+    size_t length;
+    // the range of the second byte, which excludes the overlong encodings,
+    // the surrogates and the values above U+10FFFF
+    unsigned char low = 0x80, high = 0xBF;
+    if (lead >= 0xC2 && lead <= 0xDF) length = 2;
+    else if (lead >= 0xE0 && lead <= 0xEF) {
+      length = 3;
+      if (lead == 0xE0) low = 0xA0;
+      if (lead == 0xED) high = 0x9F;
+    }
+    else if (lead >= 0xF0 && lead <= 0xF4) {
+      length = 4;
+      if (lead == 0xF0) low = 0x90;
+      if (lead == 0xF4) high = 0x8F;
+    }
+    else return 0;
+    if (in.length() - idx < length) return 0;
+    for (size_t k = 1; k < length; ++k) {
+      const unsigned char c = static_cast<unsigned char>(in[idx + k]);
+      if (c < (k == 1 ? low : 0x80) || c > (k == 1 ? high : 0xBF)) return 0;
+    }
+    // U+FFFE and U+FFFF are not allowed in XML 1.0
+    if (lead == 0xEF && static_cast<unsigned char>(in[idx + 1]) == 0xBF &&
+        static_cast<unsigned char>(in[idx + 2]) >= 0xBE) return 0;
+    return length;
+  }
+
+  /*!
    *  \brief Function which returns a string where all XML special characters are escaped,
    *  and the control characters which XML 1.0 does not allow are replaced with '?'.
+   *  The file is encoded as UTF-8: each byte which is not part of a UTF-8 encoded
+   *  character, as the bytes of a Latin-1 string, is also replaced with '?'.
    *
    *  \param in The input string
    */
@@ -725,12 +764,23 @@ public:
         case '\t': out += "&#9;"; break;
         case '\n': out += "&#10;"; break;
         case '\r': out += "&#13;"; break;
-        default:
+        default: {
+          const unsigned char c = static_cast<unsigned char>(in[idx]);
           // the other control characters are not allowed in XML 1.0
-          if (static_cast<unsigned char>(in[idx]) < 0x20)
+          if (c < 0x20)
             out += '?';
-          else
+          else if (c < 0x80)
             out += in[idx];
+          else {
+            const size_t length = utf8_char_length(in, idx);
+            if (length == 0)
+              out += '?';
+            else {
+              out.append(in, idx, length);
+              idx += length - 1;
+            }
+          }
+        }
       }
     }
     return out;
