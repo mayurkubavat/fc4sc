@@ -49,32 +49,32 @@ TEST(intervals, reunion) {
   auto c_d_self = reunion(c,d);
 
   ASSERT_EQ(a_.size(), a_self.size());
-  for (uint i=0; i < a_.size(); ++i) {
+  for (unsigned int i=0; i < a_.size(); ++i) {
     EXPECT_EQ(a_[i].first, a_self[i].first);
     EXPECT_EQ(a_[i].second, a_self[i].second);
   }
 
   ASSERT_EQ(b_.size(), b_self.size());
-  for (uint i=0; i < b_.size(); ++i) {
+  for (unsigned int i=0; i < b_.size(); ++i) {
     EXPECT_EQ(b_[i].first, b_self[i].first);
     EXPECT_EQ(b_[i].second, b_self[i].second);
   }
 
   ASSERT_EQ(c_.size(), c_self.size());
-  for (uint i=0; i < c_.size(); ++i) {
+  for (unsigned int i=0; i < c_.size(); ++i) {
     EXPECT_EQ(c_[i].first, c_self[i].first);
     EXPECT_EQ(c_[i].second, c_self[i].second);
   }
 
   ASSERT_EQ(d_.size(), d_self.size());
-  for (uint i=0; i < d_.size(); ++i) {
+  for (unsigned int i=0; i < d_.size(); ++i) {
     EXPECT_EQ(d_[i].first, d_self[i].first);
     EXPECT_EQ(d_[i].second, d_self[i].second);
   }
 
 
   ASSERT_EQ(a_b.size(), a_b_self.size());
-  for (uint i=0; i < a_b.size(); ++i) {
+  for (unsigned int i=0; i < a_b.size(); ++i) {
     EXPECT_EQ(a_b[i].first, a_b_self[i].first);
     EXPECT_EQ(a_b[i].second, a_b_self[i].second);
   }
