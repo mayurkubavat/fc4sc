@@ -305,6 +305,65 @@ std::vector<T> wildcard_values(const std::string& pattern)
 }
 
 /*!
+ * \brief Maximum number of values a with clause may test
+ */
+static const uint64_t with_max_values = 1 << 20;
+
+/*!
+ *  \brief Returns the values of intervals which satisfy a predicate, for the
+ *  with clause of a bin, see \link fc4sc::bin::with \endlink
+ *  \param intervals The values to test
+ *  \param pred Predicate called with each value, which returns true for the
+ *  values to keep
+ *  \param bin_name Name of the bin, for the error message
+ *  \returns The values kept, in the order of the intervals, from the lowest
+ *  value of each interval to its highest value
+ *
+ *  Throws std::invalid_argument if the intervals have more than
+ *  with_max_values values in all.
+ */
+template <typename T, typename F>
+std::vector<T> with_values(const std::vector<interval_t<T>>& intervals, F pred,
+                           const std::string& bin_name)
+{
+  std::vector<T> values;
+  uint64_t count = 0;
+  for (auto intv : intervals)
+  {
+    if (intv.first > intv.second) std::swap(intv.first, intv.second);
+    for (T v = intv.first; ; v = static_cast<T>(v + 1))
+    {
+      if (++count > with_max_values)
+        throw std::invalid_argument("The with clause of bin \"" + bin_name +
+                                    "\" has more than 1048576 values to test");
+      if (pred(v)) values.push_back(v);
+      if (v == intv.second) break;
+    }
+  }
+  return values;
+}
+
+/*!
+ *  \brief Returns the values as sorted and disjoint intervals
+ */
+template <typename T>
+std::vector<interval_t<T>> values_to_intervals(std::vector<T> values)
+{
+  std::sort(values.begin(), values.end());
+  values.erase(std::unique(values.begin(), values.end()), values.end());
+  std::vector<interval_t<T>> intervals;
+  for (auto v : values)
+  {
+    if (!intervals.empty() && intervals.back().second != std::numeric_limits<T>::max() &&
+        static_cast<T>(intervals.back().second + 1) == v)
+      intervals.back().second = v;
+    else
+      intervals.push_back(interval_t<T>(v, v));
+  }
+  return intervals;
+}
+
+/*!
  * \brief Defines a class for bin data model
  * \tparam T Type of values in this bin
  */
@@ -390,6 +449,21 @@ private:
   bin(T value, Args... args) noexcept : bin(args...) {
     bin_data->intervals.push_back(interval(value, value));
     bin_data->interval_hits.push_back(0);
+  }
+
+  /*!
+   *  \brief Adds a list of values to the bin, as the SystemVerilog
+   *  set_covergroup_expression
+   *  \param values New values associated with the bin
+   *  \param args Rest of arguments
+   */
+  template <typename... Args>
+  bin(const std::vector<T>& values, Args... args) noexcept : bin(args...) {
+    for (auto value : values)
+    {
+      bin_data->intervals.push_back(interval(static_cast<T>(value), static_cast<T>(value)));
+      bin_data->interval_hits.push_back(0);
+    }
   }
 
   /*!
@@ -491,6 +565,7 @@ protected:
    */
   void remove_interval_overlap()
   {
+    if (bin_data->intervals.empty()) return;
     sort(bin_data->intervals.begin(),bin_data->intervals.end(),IntervalComp());
     auto intrv_end = bin_data->intervals.begin();
     for (auto intrv = std::next(intrv_end); intrv != bin_data->intervals.end(); intrv++)
@@ -508,6 +583,36 @@ protected:
       }
     }
     bin_data->intervals.erase(++intrv_end,bin_data->intervals.end());
+  }
+
+  /*!
+   *  \brief Keeps the values of the bin which satisfy a predicate
+   */
+  template <typename F>
+  void apply_with(F pred)
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    bin_data->intervals = values_to_intervals(with_values(bin_data->intervals, pred, bin_data->name));
+    bin_data->interval_hits.assign(bin_data->intervals.size(), 0);
+  }
+
+  /*!
+   *  \brief Checks if the bin has no values, as after a with clause which
+   *  kept none. An empty bin is not added to a coverpoint: its data is
+   *  deleted and a warning is printed.
+   *  \returns true if the bin is empty
+   */
+  bool drop_if_empty()
+  {
+    if (!bin_data->intervals.empty()) return false;
+    std::cerr << "Warning: bin \"" << bin_data->name
+              << "\" has no values and is not added to the coverpoint\n";
+    delete bin_data;
+    bin_data = nullptr;
+    return true;
   }
 
 public:
@@ -534,6 +639,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if (drop_if_empty()) return;
     remove_interval_overlap();
     cvp.insert_intervals(cvp.regular_interval_map,*this,cvp.bins.size());
     cvp.bins.push_back(*this);
@@ -563,6 +669,29 @@ public:
 
   /*! Default Destructor */
   virtual ~bin() = default;
+
+  /*!
+   *  \brief Keeps the values of the bin which satisfy a predicate, as the
+   *  SystemVerilog with clause of a bin
+   *  \param pred Callable taking a value of type T and returning true for
+   *  the values to keep, as the with_covergroup_expression where the value
+   *  is item
+   *  \returns A copy of this bin, which shares its data
+   *
+   *    The SystemVerilog "bins even = {[0:255]} with (item % 2 == 0);" is
+   *  written bin<int>("even", interval(0, 255)).with([](int v) { return
+   *  v % 2 == 0; }), and the same works for illegal_bin, ignore_bin and
+   *  bin_array. The predicate is called once for each value of the bin
+   *  when the bin is constructed, so the bin may not have more than
+   *  with_max_values values, and std::invalid_argument is thrown otherwise.
+   *  A bin left without values is not added to its coverpoint.
+   */
+  template <typename F>
+  bin<T> with(F pred)
+  {
+    apply_with(pred);
+    return *this;
+  }
 
   uint64_t get_hitcount() const
   {
@@ -654,6 +783,17 @@ public:
   virtual ~illegal_bin() = default;
 
   /*!
+   *  \brief Keeps the values of the bin which satisfy a predicate, see
+   *  \link fc4sc::bin::with \endlink
+   */
+  template <typename F>
+  illegal_bin<T> with(F pred)
+  {
+    this->apply_with(pred);
+    return *this;
+  }
+
+  /*!
    * \brief Samples the given value and interval index and increments hit counts
    * \param val Current sampled value
    * \param interval index
@@ -684,6 +824,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if (this->drop_if_empty()) return;
     bin<T>::remove_interval_overlap();
     cvp.insert_intervals(cvp.illegal_interval_map,*this,cvp.illegal_bins.size());
     cvp.illegal_bins.push_back(*this);
@@ -712,6 +853,17 @@ public:
 
   virtual ~ignore_bin() = default;
 
+  /*!
+   *  \brief Keeps the values of the bin which satisfy a predicate, see
+   *  \link fc4sc::bin::with \endlink
+   */
+  template <typename F>
+  ignore_bin<T> with(F pred)
+  {
+    this->apply_with(pred);
+    return *this;
+  }
+
   /* Virtual function used to register this bin inside a coverpoint */
   virtual void add_to_cvp(coverpoint<T> &cvp) override
   {
@@ -719,6 +871,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if (this->drop_if_empty()) return;
     bin<T>::remove_interval_overlap();
     cvp.insert_intervals(cvp.ignore_interval_map,*this,cvp.ignore_bins.size());
     cvp.ignore_bins.push_back(*this);
@@ -737,6 +890,12 @@ protected:
 
   uint64_t count;
   bool sparse = false;
+
+  /*!
+   * The bin array has a list of values, one in each interval, which are
+   * distributed among count bins, as after a with clause
+   */
+  bool distribute = false;
 
   bin_array() = delete;
 
@@ -786,12 +945,89 @@ public:
                    [](const T& v) { return fc4sc::interval(v,v); });
   }
 
+  /*!
+   * \brief Constructs a bin_array of count bins, among which the values are
+   * distributed as for the SystemVerilog "bins b[count] = set_covergroup_expression;":
+   * the first values.size() / count values are in the first bin, the next ones
+   * in the next bin, and the last bin has the remaining values. If there are
+   * fewer values than bins, the bins left without values are not created.
+   *
+   * The values are deduced as a std::vector<T>, so that a braced pair, as in
+   * bin_array<int>("b", 4, {0, 15}), keeps selecting the interval constructor.
+   * Give the values as std::vector<T>{...}.
+   */
+  template <typename V, typename = typename std::enable_if<std::is_same<V, std::vector<T>>::value>::type>
+  explicit bin_array(const std::string &name, uint64_t count, const V& values) :
+    bin_array(name, values)
+  {
+    if (count == 0)
+      throw std::invalid_argument("Bin array \"" + name + "\" needs at least one bin");
+    this->count = count;
+    this->sparse = false;
+    this->distribute = true;
+  }
+
   virtual ~bin_array() = default;
+
+  /*!
+   *  \brief Keeps the values of the bin array which satisfy a predicate, as
+   *  the SystemVerilog with clause, see \link fc4sc::bin::with \endlink
+   *
+   *    With the values of a vector, as "bins b[] = {[0:15]} with (item % 3 == 0);",
+   *  which is written bin_array<int>("b", std::vector<interval_t<int>>{interval(0, 15)})
+   *  .with([](int v) { return v % 3 == 0; }), there is a bin for each value
+   *  kept, b[0] to b[5] for the values 0, 3, ... 15. With a number of bins,
+   *  as "bins b[4] = {[0:15]} with (item % 3 == 0);", written
+   *  bin_array<int>("b", 4, interval(0, 15)).with(...), the values kept are
+   *  distributed among the bins as for bin_array(name, count, values).
+   */
+  template <typename F>
+  bin_array<T> with(F pred)
+  {
+    if(this->valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    auto values = with_values(this->bin_data->intervals, pred, this->bin_data->name);
+    this->bin_data->intervals.clear();
+    for (auto v : values)
+      this->bin_data->intervals.push_back(interval(v, v));
+    this->bin_data->interval_hits.clear();
+    if (this->sparse)
+      this->count = values.size();
+    else
+      this->distribute = true;
+    return *this;
+  }
 
   /* Virtual function used to register this bin inside a coverpoint */
   virtual void add_to_cvp(coverpoint<T> &cvp) override
   {
-    if (this->sparse) {
+    if (!this->sparse && this->count == 0)
+      throw std::invalid_argument("Bin array \"" + this->bin_data->name + "\" needs at least one bin");
+    if (this->distribute) {
+      // the values, one in each interval, distributed among count bins
+      auto& values = this->bin_data->intervals;
+      const uint64_t per_bin = values.size() / this->count;
+      std::stringstream ss;
+      for (uint64_t i = 0; i < this->count; ++i) {
+        uint64_t first = i * per_bin;
+        uint64_t last = (i == this->count - 1) ? values.size() : first + per_bin;
+        if (per_bin == 0) {
+          // fewer values than bins: one value in each of the first bins
+          if (i >= values.size()) break;
+          first = i;
+          last = i + 1;
+        }
+        std::vector<T> bin_values;
+        for (uint64_t k = first; k < last; ++k)
+          bin_values.push_back(values[k].first);
+        ss << this->bin_data->name << "[" << i << "]";
+        bin<T>(ss.str(), values_to_intervals(bin_values)).add_to_cvp(cvp);
+        ss.str(std::string()); // clear the stringstream
+      }
+    }
+    else if (this->sparse) {
       // bin array was defined by using a vector of intervals or values
       // create a new bin for each value/interval and add it to the coverpoint
       std::stringstream ss;
@@ -1902,6 +2138,10 @@ public:
 
   virtual ~transition_bin() = default;
 
+  /*! A with clause does not apply to this bin, as in SystemVerilog */
+  template <typename F>
+  bin<T> with(F pred) = delete;
+
   /* Virtual function used to register this bin inside a coverpoint */
   virtual void add_to_cvp(coverpoint<T> &cvp) override
   {
@@ -2167,6 +2407,10 @@ public:
   }
 
   virtual ~default_bin() = default;
+
+  /*! A with clause does not apply to this bin, as in SystemVerilog */
+  template <typename F>
+  bin<T> with(F pred) = delete;
 
   /* Virtual function used to register this bin inside a coverpoint */
   virtual void add_to_cvp(coverpoint<T> &cvp) override

@@ -659,12 +659,10 @@ private:
   template <typename... Args>
   coverpoint(bin<T> n, Args... args) : coverpoint(args...)
   {
-    if (!n.is_empty())
-    {
-      std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
-      //bins.push_back(n);
-      n.add_to_cvp(*this);
-    }
+    // an empty bin is not added, with a warning, by add_to_cvp()
+    std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
+    //bins.push_back(n);
+    n.add_to_cvp(*this);
   }
 
   /*!
@@ -691,12 +689,10 @@ private:
   template <typename... Args>
   coverpoint(illegal_bin<T> n, Args... args) : coverpoint(args...)
   {
-    if (!n.is_empty())
-    {
-      std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
-      //illegal_bins.push_back(n);
-      n.add_to_cvp(*this);
-    }
+    // an empty bin is not added, with a warning, by add_to_cvp()
+    std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
+    //illegal_bins.push_back(n);
+    n.add_to_cvp(*this);
   }
 
   /*!
@@ -714,12 +710,10 @@ private:
   template <typename... Args>
   coverpoint(ignore_bin<T> n, Args... args) : coverpoint(args...)
   {
-    if (!n.is_empty())
-    {
-      std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
-      //ignore_bins.push_back(n);
-      n.add_to_cvp(*this);
-    }
+    // an empty bin is not added, with a warning, by add_to_cvp()
+    std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
+    //ignore_bins.push_back(n);
+    n.add_to_cvp(*this);
   }
 
   /*!
