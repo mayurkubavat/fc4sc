@@ -397,3 +397,92 @@ TEST(transition_repetition, matches_a_regular_expression) {
   }
   fc4sc::global::delete_context(cntxt);
 }
+
+// A match of a bin is not counted if the same values are a match of an
+// ignored transition (IEEE 1800-2017 19.5.6), whatever the repetitions of
+// the two transitions, and however long the match.
+class ignored_repetition_cvg : public covergroup {
+public:
+  CG_CONS(ignored_repetition_cvg) {};
+
+  int x = 0;
+
+  void sample(std::initializer_list<int> values) {
+    for (int v : values) {
+      x = v;
+      covergroup::sample();
+    }
+  }
+
+  // ignore_bins ign = (1 => 2 [-> 1]); bins d = (1 => 1 => 2); bins e = (1 => 2);
+  COVERPOINT(int, to_sequences, x) {
+    ignore_transition_bin<int>("ign", trans<int>(1, goto_repeat(2, 1))),
+    transition_bin<int>("d", trans<int>(1, 1, 2)),
+    transition_bin<int>("e", trans<int>(1, 2))
+  };
+
+  // ignore_bins ign = (0 [= 2]);
+  // bins b = (1 [= 1] => 1 [-> 1] => 1 [= 2:3]);
+  COVERPOINT(int, a, x) {
+    ignore_transition_bin<int>("ign", trans<int>(nonconsecutive_repeat(0, 2, 2))),
+    transition_bin<int>("b", trans<int>(nonconsecutive_repeat(1, 1, 1), goto_repeat(1, 1, 1),
+                                        nonconsecutive_repeat(1, 2, 3)))
+  };
+
+  // ignore_bins ign = (1 => 0, 2 [-> 1]);
+  // bins b = (1 [= 1:2] => 2 [= 1:2]);
+  COVERPOINT(int, b, x) {
+    ignore_transition_bin<int>("ign", trans<int>(1, goto_repeat(std::vector<int>{0, 2}, 1, 1))),
+    transition_bin<int>("b", trans<int>(nonconsecutive_repeat(1, 1, 2), nonconsecutive_repeat(2, 1, 2)))
+  };
+};
+
+TEST(transition_repetition, ignored_repetitions_exclude_the_same_values) {
+  // the values 0, 1, 2 written as the characters a, b, c
+  const char *bins_re[] = {
+    "(?:[^b]*[b]){1}[^b]*(?:[^b]*[b]){1}(?:[^b]*[b]){2,3}[^b]*",
+    "(?:[^b]*[b]){1,2}[^b]*(?:[^c]*[c]){1,2}[^c]*"};
+  const char *ignored_re[] = {
+    "(?:[^a]*[a]){2}[^a]*",
+    "[b](?:[^ac]*[ac]){1}"};
+
+  std::mt19937 gen(4321);
+  std::uniform_int_distribution<int> dist(0, 2);
+  std::vector<int> values(200);
+  for (auto &v : values) v = dist(gen);
+  std::string text;
+  for (auto v : values) text += static_cast<char>('a' + v);
+
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    ignored_repetition_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    // 1 => 1 => 2 is a match of 1 => 2 [-> 1]
+    cvg.sample({1, 1, 2});
+    EXPECT_EQ(cvg.to_sequences.get_bin_hit_count(0), 0u);
+    EXPECT_EQ(cvg.to_sequences.get_bin_hit_count(1), 0u);
+
+    ignored_repetition_cvg random("random", __FILE__, __LINE__, cntxt);
+    for (auto v : values) {
+      random.x = v;
+      random.sample();
+    }
+    fc4sc::coverpoint<int>* cvps[] = {&random.a, &random.b};
+    for (size_t i = 0; i < 2; ++i) {
+      // the samples which end a match of the bin which is not ignored
+      std::regex bin_re(bins_re[i]), ign_re(ignored_re[i]);
+      uint64_t expected = 0;
+      for (size_t end = 0; end < text.size(); ++end) {
+        for (size_t start = 0; start <= end; ++start) {
+          const std::string values_text = text.substr(start, end - start + 1);
+          if (std::regex_match(values_text, bin_re) && !std::regex_match(values_text, ign_re)) {
+            expected++;
+            break;
+          }
+        }
+      }
+      EXPECT_GT(expected, 0u);
+      EXPECT_EQ(cvps[i]->get_bin_hit_count(0), expected) << bins_re[i];
+    }
+  }
+  fc4sc::global::delete_context(cntxt);
+}

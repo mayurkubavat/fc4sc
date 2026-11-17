@@ -975,8 +975,17 @@ trans_repeat_t<S> nonconsecutive_repeat(S step, uint64_t min, uint64_t max)
  *   Each position of the automaton matches one sampled value: a value of
  * a step, or a value which is not of a step, in the gaps of the goto and
  * nonconsecutive repetitions. A transition may start at every sample, and
- * each position keeps the latest start of the matches which reached it,
- * so the shortest match which ends with a sample is found.
+ * each start is followed as a thread with the positions it reached.
+ *
+ *   A match of a bin is not counted if the same values are a match of an
+ * ignored transition (IEEE 1800-2017 19.5.6), whatever their number. Each
+ * thread also follows the ignored transitions with goto or nonconsecutive
+ * repetitions from its start, given as the exclusions, so that it knows if
+ * its values are one of them. The threads which started within the last
+ * window samples are kept apart, as their lengths are compared with the
+ * ignored value sequences; older threads with the same positions in all
+ * the automatons match the same values from then on, and only the latest
+ * of them, which is the shortest match, is kept.
  */
 template <typename T>
 class trans_pattern
@@ -1007,18 +1016,29 @@ public:
   /*! The transition written as in SystemVerilog, for the messages */
   std::string text;
 
-  /*! Number of the sample which starts the latest match in each position, 0 for none */
-  std::vector<uint64_t> start;
+  /*! A match in progress */
+  struct thread
+  {
+    /*! Number of the sample which started it */
+    uint64_t start;
+    /*! The positions it reached in this automaton, then in each exclusion */
+    std::vector<std::vector<bool>> active;
+    /*! It is a match of this transition which ends with the last sample */
+    bool accepted;
+    /*! Its values are a match of one of the exclusions */
+    bool excluded;
+  };
 
-  /*! Length of the shortest match which ended with the last sample, 0 for none */
-  size_t match_length = 0;
+  /*! The matches in progress, the oldest first */
+  std::vector<thread> threads;
+
+  /*! Number of the last sample */
+  uint64_t last_sample = 0;
 
   /*! Clears the matches in progress, as after an ignored value */
   void reset()
   {
-    start.assign(positions.size(), 0);
-    next_start.assign(positions.size(), 0);
-    match_length = 0;
+    threads.clear();
   }
 
   /*!
@@ -1026,30 +1046,77 @@ public:
    * \param value The value
    * \param sample Number of the sample, from 1, which grows by one with
    * each sample
-   * \returns Length of the shortest match which ends with this sample, or 0
+   * \param exclusions The ignored transitions with goto or nonconsecutive
+   * repetitions, whose matches are not matches of this transition
+   * \param window Number of the last samples whose threads are not merged
    */
-  size_t step(const T& value, uint64_t sample)
+  void step(const T& value, uint64_t sample,
+            const std::vector<const trans_pattern<T>*>& exclusions, size_t window)
   {
-    if (start.size() != positions.size()) reset();
-    std::fill(next_start.begin(), next_start.end(), 0);
-    for (size_t p = 0; p < positions.size(); ++p)
+    last_sample = sample;
+    std::vector<thread> next;
+    next.reserve(threads.size() + 1);
+    for (auto &t : threads)
     {
-      if (start[p] == 0) continue;
-      for (auto q : positions[p].follow)
-        if (start[p] > next_start[q] && matches(q, value))
-          next_start[q] = start[p];
+      if (t.active.size() != exclusions.size() + 1) continue;
+      thread n{t.start, std::vector<std::vector<bool>>(), false, false};
+      n.active.push_back(advance(t.active[0], value));
+      if (!any(n.active[0])) continue;
+      for (size_t k = 0; k < exclusions.size(); ++k)
+        n.active.push_back(exclusions[k]->advance(t.active[k + 1], value));
+      next.push_back(std::move(n));
     }
-    for (auto q : first)
-      if (matches(q, value))
-        next_start[q] = sample;
-    start.swap(next_start);
+    thread n{sample, std::vector<std::vector<bool>>(), false, false};
+    n.active.push_back(begin(value));
+    if (any(n.active[0])) {
+      for (size_t k = 0; k < exclusions.size(); ++k)
+        n.active.push_back(exclusions[k]->begin(value));
+      next.push_back(std::move(n));
+    }
 
-    uint64_t latest = 0;
-    for (size_t p = 0; p < positions.size(); ++p)
-      if (last[p] && start[p] > latest)
-        latest = start[p];
-    match_length = (latest == 0) ? 0 : static_cast<size_t>(sample - latest + 1);
-    return match_length;
+    threads.clear();
+    for (auto &t : next)
+    {
+      bool merged = false;
+      if (sample - t.start >= window)
+        for (auto &kept : threads)
+          if (sample - kept.start >= window && kept.active == t.active) {
+            kept.start = std::max(kept.start, t.start);
+            merged = true;
+            break;
+          }
+      if (merged) continue;
+      t.accepted = accepts(t.active[0]);
+      for (size_t k = 0; k < exclusions.size(); ++k)
+        t.excluded = t.excluded || exclusions[k]->accepts(t.active[k + 1]);
+      threads.push_back(std::move(t));
+    }
+  }
+
+  /*!
+   * \brief Finds the matches which end with the last sample
+   * \param excluded Lengths of the last values which are not to be
+   * matched, or nullptr
+   * \param matched Returns the lengths of the matches, up to max_length,
+   * if not nullptr
+   * \param max_length Longest length returned in matched
+   * \returns Length of the shortest match which is not excluded, or 0
+   */
+  size_t match(const std::vector<size_t>* excluded, std::vector<size_t>* matched,
+               size_t max_length) const
+  {
+    size_t shortest = 0;
+    for (auto &t : threads)
+    {
+      if (!t.accepted) continue;
+      const size_t length = static_cast<size_t>(last_sample - t.start + 1);
+      if (matched != nullptr && length <= max_length) matched->push_back(length);
+      if (t.excluded) continue;
+      if (excluded != nullptr &&
+          std::find(excluded->begin(), excluded->end(), length) != excluded->end()) continue;
+      if (shortest == 0 || length < shortest) shortest = length;
+    }
+    return shortest;
   }
 
   /*! The values of the steps */
@@ -1064,7 +1131,43 @@ public:
 
 private:
 
-  std::vector<uint64_t> next_start;
+  static bool any(const std::vector<bool>& active)
+  {
+    return std::find(active.begin(), active.end(), true) != active.end();
+  }
+
+  /*! The positions which a match starting with a value reaches */
+  std::vector<bool> begin(const T& value) const
+  {
+    std::vector<bool> next(positions.size(), false);
+    for (auto q : first)
+      if (matches(q, value))
+        next[q] = true;
+    return next;
+  }
+
+  /*! The positions which a match reaches with the next value */
+  std::vector<bool> advance(const std::vector<bool>& active, const T& value) const
+  {
+    std::vector<bool> next(positions.size(), false);
+    for (size_t p = 0; p < active.size(); ++p)
+    {
+      if (!active[p]) continue;
+      for (auto q : positions[p].follow)
+        if (!next[q] && matches(q, value))
+          next[q] = true;
+    }
+    return next;
+  }
+
+  /*! A match which reached the positions is a match of the transition */
+  bool accepts(const std::vector<bool>& active) const
+  {
+    for (size_t p = 0; p < active.size(); ++p)
+      if (active[p] && last[p])
+        return true;
+    return false;
+  }
 
   bool matches(size_t p, const T& value) const
   {
@@ -1587,11 +1690,15 @@ public:
    * nonconsecutive repetitions, before sample() is called
    * \param value The sampled value
    * \param sample Number of the sample, which grows by one with each sample
+   * \param exclusions The ignored transitions with goto or nonconsecutive
+   * repetitions of the coverpoint, none for an ignore bin
+   * \param window Length of the longest value sequence of the coverpoint
    */
-  void step_patterns(const T& value, uint64_t sample)
+  void step_patterns(const T& value, uint64_t sample,
+                     const std::vector<const trans_pattern<T>*>& exclusions, size_t window)
   {
     for (auto &pattern : patterns)
-      pattern.step(value, sample);
+      pattern.step(value, sample, exclusions, window);
   }
 
   /*!
@@ -1663,11 +1770,9 @@ public:
     // step_patterns(): a shorter match is counted instead
     for (size_t i = 0; i < patterns.size(); ++i)
     {
-      const size_t length = patterns[i].match_length;
+      const size_t length = patterns[i].match(excluded, matched, max_length);
       if (length == 0) continue;
-      if (matched != nullptr) matched->push_back(length);
-      if ((hit < 0 || length < hit_length) && (excluded == nullptr ||
-          std::find(excluded->begin(), excluded->end(), length) == excluded->end())) {
+      if (hit < 0 || length < hit_length) {
         hit = static_cast<int>(sequences.size() + i);
         hit_length = length;
       }

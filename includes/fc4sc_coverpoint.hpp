@@ -483,29 +483,38 @@ private:
     trans_samples++;
 
     // the transitions with goto or nonconsecutive repetitions match each
-    // sample, and no transition goes on past an ignored value
-    auto step_patterns = [&](bin_data_model<T>* bin_data) {
+    // sample, and no transition goes on past an ignored value. The matches
+    // of the ignored ones are not matches of the others.
+    std::vector<const trans_pattern<T>*> ignored_patterns;
+    for (auto index : this->trans_ignore_bins)
+      for (auto &pattern : static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data)->patterns)
+        ignored_patterns.push_back(&pattern);
+    const std::vector<const trans_pattern<T>*> no_patterns;
+    auto step_patterns = [&](bin_data_model<T>* bin_data, const std::vector<const trans_pattern<T>*>& exclusions) {
       auto data = static_cast<transition_bin_data_model<T>*>(bin_data);
       if (data->patterns.empty()) return;
       if (ignored)
         data->reset_patterns();
       else
-        data->step_patterns(cvp_val, trans_samples);
+        data->step_patterns(cvp_val, trans_samples, exclusions, trans_depth);
     };
     for (auto index : this->trans_ignore_bins)
-      step_patterns(this->ignore_bins[index].bin_data);
+      step_patterns(this->ignore_bins[index].bin_data, no_patterns);
     for (auto index : this->trans_illegal_bins)
-      step_patterns(this->illegal_bins[index].bin_data);
+      step_patterns(this->illegal_bins[index].bin_data, ignored_patterns);
     for (auto index : this->trans_bins)
-      step_patterns(this->bins[index].bin_data);
+      step_patterns(this->bins[index].bin_data, ignored_patterns);
     if (ignored) return;
 
-    // the lengths of the last values which are an ignored sequence
+    // the lengths of the last values which are an ignored sequence, up to
+    // the longest value sequence
     std::vector<size_t> ignored_lengths;
+    bool ignored_hit = false;
     for (auto index : this->trans_ignore_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data);
-      data->sample(trans_history, trans_clean, nullptr, &ignored_lengths);
+      if (data->sample(trans_history, trans_clean, nullptr, &ignored_lengths) >= 0)
+        ignored_hit = true;
     }
 
     for (auto index : this->trans_illegal_bins)
@@ -520,7 +529,7 @@ private:
       }
     }
 
-    bool trans_hit = !ignored_lengths.empty();
+    bool trans_hit = ignored_hit;
     for (auto index : this->trans_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->bins[index].bin_data);
