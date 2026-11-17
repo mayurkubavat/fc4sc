@@ -426,31 +426,29 @@ private:
    */
   interval_map_iterator_t add_range_map(interval_map_iterator_t hint_it,interval_map_t& interval_map,bin_range_t bin_range_key,fc4sc::interval_t<T> range)
   {
-    // hint_it is end() when the range is after all the intervals: nothing
-    // is to be read from it, and the loop below appends the range
-    if(hint_it != interval_map.end() && range.second < hint_it->first.first) {
-      std::vector<bin_range_t> bin_range_vec{bin_range_key};
-      return std::next( interval_map.insert(hint_it,{range, bin_range_vec }) );
-    }
-    for(auto map_it = hint_it; map_it != interval_map.end(); map_it++)
+    // slice_intervals_map() has cut the intervals of the map at the ends of
+    // the range, so each interval of the map is either inside the range or
+    // outside it. The bin is added to the intervals inside the range, and
+    // the values of the range between them get intervals of their own.
+    auto map_it = hint_it;
+    while(map_it != interval_map.end() && map_it->first.second < range.first)
+      ++map_it;
+    // lowest value of the range not yet in the map
+    T next = range.first;
+    while(map_it != interval_map.end() && map_it->first.first <= range.second)
     {
-      auto it = map_it->first;
-      if(range.first > range.second) {
-        return map_it;
-      }
-      if(range.first <= it.first && range.second >= it.second) { 
-	map_it->second.push_back(bin_range_key);
-      }
-      if(range.first < it.first) {
+      if(next < map_it->first.first) {
         std::vector<bin_range_t> bin_range_vec{bin_range_key};
-        map_it = std::next(interval_map.insert(map_it, {fc4sc::interval<T>(range.first,it.first-1), bin_range_vec } ));
+        interval_map.insert(map_it, {fc4sc::interval<T>(next,map_it->first.first-1), bin_range_vec } );
       }
-      if(it.second + 1 > range.first)
-        range.first = it.second + 1;
+      map_it->second.push_back(bin_range_key);
+      if(map_it->first.second == range.second)
+        return std::next(map_it);
+      next = map_it->first.second + 1;
+      ++map_it;
     }
     std::vector<bin_range_t> bin_range_vec{bin_range_key};
-    interval_map.insert(interval_map.end(), {range, bin_range_vec } );
-    return interval_map.end();
+    return std::next(interval_map.insert(map_it, {fc4sc::interval<T>(next,range.second), bin_range_vec } ));
   }
 
   /*!
