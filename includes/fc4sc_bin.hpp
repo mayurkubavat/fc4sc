@@ -1440,6 +1440,16 @@ public:
     return std::to_string(static_cast<wide_t>(value));
   }
 
+  std::vector<std::tuple<std::string, std::string, uint64_t>> get_unhit_array_range() const
+  {
+    std::vector<std::tuple<std::string, std::string, uint64_t>> ranges;
+    if (array && value_hits.empty() && !this->intervals.empty()) {
+      const std::string first = to_decimal(this->intervals[0].first);
+      ranges.push_back(std::make_tuple(first, first, uint64_t(0)));
+    }
+    return ranges;
+  }
+
   std::vector<std::tuple<std::string, std::string, uint64_t>> get_default_ranges() const
   {
     std::vector<std::tuple<std::string, std::string, uint64_t>> ranges;

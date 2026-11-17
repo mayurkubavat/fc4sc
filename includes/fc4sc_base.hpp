@@ -306,6 +306,16 @@ public:
   }
 
   /*!
+   * For a default bin array which has values but no value hit, a range of
+   * its first value with no hits, written in decimal: the file has a bin
+   * of the array for it, so that the coverpoint has a bin. Empty otherwise.
+   */
+  virtual std::vector<std::tuple<std::string, std::string, uint64_t>> get_unhit_array_range() const
+  {
+    return std::vector<std::tuple<std::string, std::string, uint64_t>>();
+  }
+
+  /*!
    * Get the value ranges of a default bin with their hit counts, the
    * values written in decimal, as they may not fit in an int. For a default
    * bin array, as the SystemVerilog "bins b[] = default;", which has a bin

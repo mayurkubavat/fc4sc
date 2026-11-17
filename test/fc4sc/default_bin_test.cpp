@@ -15,6 +15,7 @@
    limitations under the License.
 
 ******************************************************************************/
+#include <climits>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -244,4 +245,51 @@ TEST(default_bin, wide_types_written_to_ucis_xml) {
 
   EXPECT_NE(xml.find("<coverpointBin name=\"rest[4294967304]\""), std::string::npos);
   EXPECT_NE(xml.find("<coverpointBin name=\"rest[8589934600]\""), std::string::npos);
+}
+
+class default_bin_array_only_cvg : public covergroup {
+public:
+  CG_CONS(default_bin_array_only_cvg) {};
+
+  int x = 0;
+
+  COVERPOINT(int, only_array, x) {
+    default_bin_array<int>("rest")
+  };
+
+  COVERPOINT(int, after_bins, x) {
+    bin<int>("low", interval(INT_MIN, 7)),
+    default_bin_array<int>("high")
+  };
+};
+
+// A coverpoint needs at least one bin in the UCIS XML file: a default bin
+// array without hits has a bin for its first value, with no hits
+TEST(default_bin, array_without_hits_written_to_ucis_xml) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    default_bin_array_only_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    xml_printer::coverage_save("default_bin_array_only_test.xml", cntxt);
+  }
+  fc4sc::global::delete_context(cntxt);
+
+  std::ifstream file("default_bin_array_only_test.xml");
+  std::stringstream content;
+  content << file.rdbuf();
+  const std::string xml = content.str();
+
+  size_t cvp = xml.find("<coverpoint name=\"only_array\"");
+  ASSERT_NE(cvp, std::string::npos);
+  const std::string only_array = xml.substr(cvp, xml.find("</coverpoint>", cvp) - cvp);
+  size_t pos = only_array.find("<coverpointBin name=\"rest[-2147483648]\"");
+  ASSERT_NE(pos, std::string::npos);
+  const std::string rest = only_array.substr(pos, only_array.find("</coverpointBin>", pos) - pos);
+  EXPECT_NE(rest.find("type=\"ignore\""), std::string::npos);
+  EXPECT_NE(rest.find("from=\"-2147483648\" \nto =\"-2147483648\""), std::string::npos);
+  EXPECT_NE(rest.find("coverageCount=\"0\""), std::string::npos);
+
+  cvp = xml.find("<coverpoint name=\"after_bins\"");
+  ASSERT_NE(cvp, std::string::npos);
+  const std::string after_bins = xml.substr(cvp, xml.find("</coverpoint>", cvp) - cvp);
+  EXPECT_NE(after_bins.find("<coverpointBin name=\"high[8]\""), std::string::npos);
 }

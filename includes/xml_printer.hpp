@@ -550,13 +550,16 @@ public:
    * \brief Writes a default bin. The type "default" of UCIS is the type of
    * the regular bins, which are counted in the coverage, so a default bin is
    * written as an ignore bin, which is not. A default bin array has a bin
-   * for each value hit. A bin without values or hits is not written, as a
-   * bin needs at least one range.
+   * for each value hit. A bin without values is not written, as a bin needs
+   * at least one range. A bin array without hits has a bin for its first
+   * value, with no hits, as a coverpoint needs at least one bin.
    */
   void write_default_bin(fc4sc::bin_base_data_model& base)
   {
     auto ranges = base.get_default_ranges();
     if (base.is_value_array()) {
+      if (ranges.empty())
+        ranges = base.get_unhit_array_range();
       // the values may not fit in an int, so the names use the values
       // written in decimal, which are unique
       for (auto &range : ranges)
