@@ -338,3 +338,32 @@ TEST(with_bin, zero_bins_in_array) {
   EXPECT_THROW(zero_count_plain_cvg("plain", __FILE__, __LINE__, cntxt), std::invalid_argument);
   fc4sc::global::delete_context(cntxt);
 }
+
+// the empty bins given as arguments of the coverpoint constructor, rather
+// than in the initializer list of COVERPOINT
+class empty_bin_args_cvg : public covergroup {
+public:
+  CG_CONS(empty_bin_args_cvg) {};
+
+  int x = 0;
+
+  coverpoint<int> cvp = coverpoint<int>(this, "cvp",
+    bin<int>("empty", interval(0, 7)).with([](int) { return false; }),
+    illegal_bin<int>("empty_illegal", interval(0, 7)).with([](int) { return false; }),
+    ignore_bin<int>("empty_ignore", interval(0, 7)).with([](int) { return false; }),
+    bin<int>("one", 1));
+};
+
+TEST(with_bin, empty_bin_arguments_warn) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    testing::internal::CaptureStderr();
+    empty_bin_args_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    const std::string err = testing::internal::GetCapturedStderr();
+    ASSERT_EQ(cvg.cvp.size(), 1u);
+    for (const char *name : {"\"empty\"", "\"empty_illegal\"", "\"empty_ignore\""})
+      EXPECT_NE(err.find(std::string("Warning: bin ") + name + " has no values"),
+                std::string::npos) << name;
+  }
+  fc4sc::global::delete_context(cntxt);
+}
