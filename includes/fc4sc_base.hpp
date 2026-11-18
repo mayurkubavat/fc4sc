@@ -292,17 +292,51 @@ public:
   /*! Indicates if the data within this object is valid */
   std::shared_ptr<bool> valid = std::make_shared<bool>(true);
 
-  /*! Get intervals in type int */
+  /*!
+   * Get intervals in type int. The values which do not fit in an int, as
+   * the values of a 64-bit type or the values of an unsigned int above
+   * INT_MAX, are truncated: get_intervals_decimal() has them in full.
+   */
   virtual std::vector<interval_t<int>> get_intervals_to_int() const = 0;
 
   /*!
    * Get the value sequences of a transition bin in type int. The hit
    * counts in get_interval_hits() belong to these sequences, and a bin has
-   * either intervals or sequences.
+   * either intervals or sequences. The values are truncated to an int as
+   * in get_intervals_to_int(): get_sequences_decimal() has them in full.
    */
   virtual std::vector<std::vector<int>> get_sequences_to_int() const
   {
     return std::vector<std::vector<int>>();
+  }
+
+  /*!
+   * Get the intervals with their limits written in decimal, in full: a
+   * value of any integral type, up to 64 bits, signed or unsigned. These
+   * are the values written to the coverage database.
+   */
+  virtual std::vector<interval_t<std::string>> get_intervals_decimal() const
+  {
+    std::vector<interval_t<std::string>> intervals;
+    for (auto &intv : get_intervals_to_int())
+      intervals.push_back(interval_t<std::string>(std::to_string(intv.first), std::to_string(intv.second)));
+    return intervals;
+  }
+
+  /*!
+   * Get the value sequences of a transition bin with their values written
+   * in decimal, in full, as get_intervals_decimal()
+   */
+  virtual std::vector<std::vector<std::string>> get_sequences_decimal() const
+  {
+    std::vector<std::vector<std::string>> sequences;
+    for (auto &seq : get_sequences_to_int())
+    {
+      sequences.push_back(std::vector<std::string>());
+      for (auto value : seq)
+        sequences.back().push_back(std::to_string(value));
+    }
+    return sequences;
   }
 
   /*!
@@ -377,8 +411,18 @@ public:
    */
   virtual uint64_t get_hitcount() const = 0;
  
-  /*! Get intervals casted as int type */
+  /*! Get intervals casted as int type, the values which do not fit in an
+   *  int truncated */
   virtual std::vector<interval_t<int>> get_intervals_to_int() const = 0;
+
+  /*! Get intervals with their limits written in decimal, in full */
+  virtual std::vector<interval_t<std::string>> get_intervals_decimal() const
+  {
+    std::vector<interval_t<std::string>> intervals;
+    for (auto &intv : get_intervals_to_int())
+      intervals.push_back(interval_t<std::string>(std::to_string(intv.first), std::to_string(intv.second)));
+    return intervals;
+  }
 
   /*! Get reference to bin name */
   virtual std::string& name() = 0;

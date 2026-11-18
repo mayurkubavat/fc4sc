@@ -723,7 +723,9 @@ public:
            << "\" "
            << ">\n";
 
-    auto bin_intervals = base.get_intervals_to_int();
+    // the values in full, as the schema type of from and to, xsd:integer,
+    // has no limit
+    auto bin_intervals = base.get_intervals_decimal();
     auto interval_hits = base.get_interval_hits();
 
     // Print each range. Coverpoint writes the header (name etc.)
@@ -742,14 +744,14 @@ public:
     }
 
     // Print each sequence of a transition bin
-    auto bin_sequences = base.get_sequences_to_int();
+    auto bin_sequences = base.get_sequences_decimal();
     for (size_t i = 0; i < bin_sequences.size(); ++i)
     {
       stream << "<sequence>\n";
       stream << "<contents "
              << "coverageCount=\"" << interval_hits[i] << "\">";
       stream << "</contents>\n";
-      for (auto value : bin_sequences[i])
+      for (auto &value : bin_sequences[i])
         stream << "<seqValue>" << value << "</seqValue>\n";
       stream << "</sequence>\n\n";
     }
