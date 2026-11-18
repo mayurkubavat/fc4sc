@@ -312,8 +312,9 @@ public:
   /*!
    * \brief Writes the instances of a covergroup type which has the
    * strict_sv_options type option and which do not have the per_instance
-   * option as one covergroup instance, named after the type, which holds
-   * the type coverage
+   * option as one covergroup instance which holds the type coverage. Its
+   * name is empty, so that it is told apart from every instance, which has
+   * a name, and its alias is the name of the type.
    *
    *   As in SystemVerilog (IEEE 1800-2017 19.7), the data of an instance
    * without per_instance is not saved on its own, but it contributes to the
@@ -345,7 +346,8 @@ public:
     }
 
     const fc4sc::cvg_metadata& type = *insts.front()->type_data;
-    record->set("name", as_written(type.type_name));
+    record->set("name", "");
+    record->set("alias", as_written(type.type_name));
     xml_node* options = record->element("options");
     if (options != nullptr) {
       options->set("weight", std::to_string(type.type_option.weight));

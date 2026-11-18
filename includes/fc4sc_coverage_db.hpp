@@ -1127,13 +1127,13 @@ private:
         if (data->name == name && data->type_data->type_name == type &&
             data->type_data->scp_type_name == scp_type)
           cvg = data;
-    // the covergroup instance named after its type which holds the type
+    // the covergroup instance with an empty name which holds the type
     // coverage of the instances without per_instance, with the
     // strict_sv_options type option: its counts are added to the first of
     // these instances
     for (auto &type_it : scp.cvgs)
       for (auto data : type_it.second)
-        if (cvg == nullptr && name == type && data->type_data->type_name == type &&
+        if (cvg == nullptr && name.empty() && data->type_data->type_name == type &&
             data->type_data->scp_type_name == scp_type &&
             strict_sv_options(data->type_data) && data->enable && !data->option.per_instance)
           cvg = data;
@@ -1328,7 +1328,7 @@ private:
  * names, the bins of a coverpoint by their names and types, their ranges by
  * their limits and their sequences by their values, the automatically
  * created bins of a cross by their indices and its user defined bins by
- * their names. The covergroup instance named after its type, which holds
+ * their names. The covergroup instance with an empty name, which holds
  * the type coverage of the instances without option.per_instance of a type
  * with the strict_sv_options type option, is loaded into the first enabled
  * instance of that type without option.per_instance. The elements of the

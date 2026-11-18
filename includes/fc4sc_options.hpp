@@ -70,8 +70,8 @@ struct cvg_option
    * covergroup type. The option is used when the strict_sv_options type
    * option is set: an instance without per_instance is then not written
    * to the database on its own, but merged with the other such instances
-   * of its type into one covergroup instance, named after the type, which
-   * holds the type coverage. Without strict_sv_options every instance is
+   * of its type into one covergroup instance, with an empty name and the
+   * name of the type as its alias, which holds the type coverage. Without strict_sv_options every instance is
    * written, as SystemVerilog allows.
    */
   bool per_instance;
@@ -248,7 +248,8 @@ struct cvg_type_option // covergroup type_option declaration
    * database and some coverage numbers, so it is off by default:
    *  - option.per_instance: only the instances which set it are written to
    *    the coverage database. The others are merged into one covergroup
-   *    instance named after the type, whose bins are the union of their
+   *    instance with an empty name, which no instance can have, and the
+   *    name of the type as its alias, whose bins are the union of their
    *    bins, matched by name, with the hits added up: a reader of the
    *    database computes the type coverage from it as for merge_instances,
    *    as the weighted average of these instances cannot be computed

@@ -263,10 +263,11 @@ TEST(coverage_options_semantics, per_instance_in_the_database) {
   auto root = fc4sc::ucis_db::read_xml_file("coverage_options_per_instance.xml");
   const xml_node* group = covergroup_coverage(*root);
   ASSERT_NE(group, nullptr);
-  EXPECT_EQ(instance_names(*group), std::vector<std::string>({"sv_opt_cvg", "inst3"}));
+  EXPECT_EQ(instance_names(*group), std::vector<std::string>({"", "inst3"}));
 
-  const xml_node* type = child_named(*group, "cgInstance", "sv_opt_cvg");
+  const xml_node* type = child_named(*group, "cgInstance", "");
   ASSERT_NE(type, nullptr);
+  EXPECT_EQ(type->get("alias"), "sv_opt_cvg");
   EXPECT_EQ(type->element("options")->get("comment"), "type comment");
   EXPECT_EQ(type->element("options")->get("weight"), "2");
   EXPECT_EQ(type->element("options")->get("per_instance"), "false");
@@ -328,7 +329,7 @@ TEST(coverage_options_semantics, type_instance_loaded_and_merged) {
   auto root = fc4sc::ucis_db::read_xml_file("coverage_options_merged.xml");
   const xml_node* group = covergroup_coverage(*root);
   ASSERT_NE(group, nullptr);
-  EXPECT_EQ(instance_names(*group), std::vector<std::string>({"sv_opt_cvg"}));
+  EXPECT_EQ(instance_names(*group), std::vector<std::string>({""}));
   std::map<std::string, uint64_t> a_bins = {{"lo", 4}, {"hi", 2}};
   EXPECT_EQ(bin_counts(*child_named(*group->element("cgInstance"), "coverpoint", "a")), a_bins);
 
@@ -343,6 +344,47 @@ TEST(coverage_options_semantics, type_instance_loaded_and_merged) {
     EXPECT_EQ(inst1.a.get_bin_hit_count(1), 2u);
     EXPECT_EQ(inst1.b.get_bin_hit_count(1), 4u);
     EXPECT_EQ(inst2.a.get_bin_hit_count(0), 0u);
+  }
+  fc4sc::global::delete_context(cntxt);
+}
+
+// An instance may have the name of its type: the instance which holds the
+// type coverage is told apart from it, when it is written and loaded
+TEST(coverage_options_semantics, instance_named_like_its_type) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    sv_opt_cvg named("sv_opt_cvg", __FILE__, __LINE__, cntxt);
+    sv_opt_cvg other("other", __FILE__, __LINE__, cntxt);
+    named.type_option().strict_sv_options = true;
+    named.option().per_instance = true;
+    named.sample(0, 0);
+    other.sample(1, 1);
+    xml_printer::coverage_save("coverage_options_named_like_type.xml", cntxt);
+  }
+  fc4sc::global::delete_context(cntxt);
+
+  auto root = fc4sc::ucis_db::read_xml_file("coverage_options_named_like_type.xml");
+  EXPECT_EQ(instance_names(*covergroup_coverage(*root)), std::vector<std::string>({"", "sv_opt_cvg"}));
+
+  // merged with itself, the two instances stay apart
+  fc4sc::merge_coverage_db({"coverage_options_named_like_type.xml", "coverage_options_named_like_type.xml"},
+                           "coverage_options_named_like_type_merged.xml");
+  root = fc4sc::ucis_db::read_xml_file("coverage_options_named_like_type_merged.xml");
+  EXPECT_EQ(instance_names(*covergroup_coverage(*root)), std::vector<std::string>({"", "sv_opt_cvg"}));
+
+  cntxt = fc4sc::global::create_new_context();
+  {
+    sv_opt_cvg named("sv_opt_cvg", __FILE__, __LINE__, cntxt);
+    sv_opt_cvg other("other", __FILE__, __LINE__, cntxt);
+    named.type_option().strict_sv_options = true;
+    named.option().per_instance = true;
+    EXPECT_EQ(fc4sc::load_coverage_db("coverage_options_named_like_type.xml", cntxt), 10u);
+    EXPECT_EQ(named.a.get_bin_hit_count(0), 1u);
+    EXPECT_EQ(named.a.get_bin_hit_count(1), 0u);
+    EXPECT_EQ(other.a.get_bin_hit_count(0), 0u);
+    EXPECT_EQ(other.a.get_bin_hit_count(1), 1u);
+    EXPECT_EQ(named.a.get_inst_coverage(), 50);
+    EXPECT_EQ(other.a.get_inst_coverage(), 50);
   }
   fc4sc::global::delete_context(cntxt);
 }
