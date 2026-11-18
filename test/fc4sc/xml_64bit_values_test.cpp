@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -251,4 +252,37 @@ TEST(xml_64bit_values, parse_decimal) {
   EXPECT_FALSE(fc4sc::ucis_db::parse_decimal("-", v));
   EXPECT_FALSE(fc4sc::ucis_db::parse_decimal("1e3", v));
   EXPECT_FALSE(fc4sc::ucis_db::parse_decimal("0x10", v));
+}
+
+// A file written with the values truncated to an int, as before they were
+// written in full, has bins with other ranges: they are merged with a warning
+TEST(xml_64bit_values, merge_warns_for_truncated_values) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    wide_values_cvg cvg("cvg", __FILE__, __LINE__, cntxt);
+    cvg.sample_values();
+    xml_printer::coverage_save("xml_64bit_values_new.xml", cntxt);
+  }
+  fc4sc::global::delete_context(cntxt);
+
+  std::stringstream text;
+  text << std::ifstream("xml_64bit_values_new.xml").rdbuf();
+  std::string old = text.str();
+  const std::string from = "from=\"2147483648\" \nto =\"4294967295\"";
+  ASSERT_NE(old.find(from), std::string::npos);
+  old.replace(old.find(from), from.size(), "from=\"-2147483648\" \nto =\"-1\"");
+  std::ofstream("xml_64bit_values_old.xml") << old;
+
+  testing::internal::CaptureStderr();
+  fc4sc::merge_coverage_db({"xml_64bit_values_new.xml", "xml_64bit_values_new.xml"},
+                           "xml_64bit_values_new_new.xml");
+  EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
+
+  testing::internal::CaptureStderr();
+  fc4sc::merge_coverage_db({"xml_64bit_values_new.xml", "xml_64bit_values_old.xml"},
+                           "xml_64bit_values_new_old.xml");
+  const std::string warnings = testing::internal::GetCapturedStderr();
+  EXPECT_NE(warnings.find("Warning! range -2147483648:-1 of bin high of coverpoint w_cvp of covergroup cvg"),
+            std::string::npos) << warnings;
+  EXPECT_EQ(warnings.find("of bin top"), std::string::npos) << warnings;
 }

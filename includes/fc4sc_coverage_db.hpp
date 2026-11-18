@@ -952,8 +952,9 @@ private:
 
   void merge_cg_instance(xml_node& into, const xml_node& from)
   {
-    merge_children(into, from, "coverpoint", name_key, [this](xml_node& a, const xml_node& b) {
-      merge_coverpoint(a, b);
+    const std::string where = "covergroup " + into.get("name") + " of type " + cg_name(into);
+    merge_children(into, from, "coverpoint", name_key, [this, &where](xml_node& a, const xml_node& b) {
+      merge_coverpoint(a, b, where);
     });
     merge_children(into, from, "cross", name_key, [](xml_node& a, const xml_node& b) {
       // the bins of a cross are known by their names, as <0,1>
@@ -965,6 +966,15 @@ private:
   static void merge_children_counts(xml_node& into, const xml_node& from,
                                     const std::string& child_name, K key)
   {
+    merge_children_counts(into, from, child_name, key, [](const xml_node&) { });
+  }
+
+  /*! Merges the children with a name, calling added for each child of from
+   *  which matches none of into, before it is added */
+  template <typename K, typename A>
+  static void merge_children_counts(xml_node& into, const xml_node& from,
+                                    const std::string& child_name, K key, A added)
+  {
     keyed_children children(into, child_name, key);
     for (auto child : from.elements(child_name))
     {
@@ -974,16 +984,36 @@ private:
         continue;
       }
       coverage_count(*child);
+      added(*child);
       std::unique_ptr<xml_node> copy = child->clone();
       children.add(key(*child), copy.get());
       insert_child(into, std::move(copy));
     }
   }
 
-  void merge_coverpoint(xml_node& into, const xml_node& from)
+  /*!
+   * \brief Merges a coverpoint into another
+   * \param where The covergroup instance of the coverpoints, for the
+   * warnings, or empty for no warnings
+   *
+   *   A bin of one file which matches a bin of the other has the same ranges
+   * and sequences, unless the bins are not the same: when the coverage model
+   * changed, or when one of the files was written with values truncated to
+   * an int, as before 64-bit values were written in full. The ranges and
+   * sequences of a matching bin which match none of the other are added to
+   * the bin, with a warning.
+   */
+  void merge_coverpoint(xml_node& into, const xml_node& from, const std::string& where = std::string())
   {
     auto bin_key = [](const xml_node& n) { return n.get("type") + "\n" + n.get("name"); };
-    merge_children(into, from, "coverpointBin", bin_key, [](xml_node& a, const xml_node& b) {
+    const std::string cvp = into.get("name");
+    merge_children(into, from, "coverpointBin", bin_key, [&where, &cvp](xml_node& a, const xml_node& b) {
+      auto warn = [&](const std::string& what) {
+        if (where.empty()) return;
+        std::cerr << "FC4SC merge_coverage_db: Warning! " << what << " of bin " << a.get("name")
+                  << " of coverpoint " << cvp << " of " << where
+                  << " is not in that bin of the files merged before; it is added to the bin\n";
+      };
       // the limits in decimal, so that the same values written differently
       // are the same range; other text is kept as it is
       auto range_key = [](const xml_node& n) {
@@ -992,14 +1022,18 @@ private:
         parse_decimal(to, to);
         return from + ":" + to;
       };
-      merge_children_counts(a, b, "range", range_key);
+      merge_children_counts(a, b, "range", range_key, [&](const xml_node& n) {
+        warn("range " + n.get("from") + ":" + n.get("to"));
+      });
       auto sequence_key = [](const xml_node& n) {
         std::string key;
         for (auto &v : decimal_list(n, "seqValue"))
           key += v + ",";
         return key;
       };
-      merge_children_counts(a, b, "sequence", sequence_key);
+      merge_children_counts(a, b, "sequence", sequence_key, [&](const xml_node& n) {
+        warn("sequence " + sequence_key(n));
+      });
     });
   }
 };
