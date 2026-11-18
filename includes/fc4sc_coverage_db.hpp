@@ -540,6 +540,33 @@ inline bool parse_int(const std::string& text, long long& value)
   return errno != ERANGE;
 }
 
+/*!
+ * \brief Reads an integer of any size, as a limit of a range or a value of
+ * a sequence, which the schema types as xsd:integer
+ * \param text The integer, with optional white space around it
+ * \param value Returns the integer in decimal, as FC4SC writes it: without
+ * a plus sign or leading zeros, and 0 without a minus sign
+ * \returns false if the text is not an integer
+ */
+inline bool parse_decimal(const std::string& text, std::string& value)
+{
+  size_t first = text.find_first_not_of(" \t\r\n");
+  size_t last = text.find_last_not_of(" \t\r\n");
+  if (first == std::string::npos) return false;
+  const std::string digits = text.substr(first, last - first + 1);
+  const bool negative = (digits[0] == '-');
+  const size_t start = (negative || digits[0] == '+') ? 1 : 0;
+  if (start == digits.size() || digits.find_first_not_of("0123456789", start) != std::string::npos)
+    return false;
+  size_t nonzero = digits.find_first_not_of('0', start);
+  if (nonzero == std::string::npos) {
+    value = "0";
+    return true;
+  }
+  value = (negative ? "-" : "") + digits.substr(nonzero);
+  return true;
+}
+
 /*! Adds without overflow: the sum stops at the largest count */
 inline uint64_t add_saturated(uint64_t a, uint64_t b)
 {
@@ -577,6 +604,24 @@ inline std::vector<long long> int_list(const xml_node& node, const std::string& 
   {
     long long v = 0;
     if (!parse_int(child->text, v))
+      throw std::runtime_error("Element <" + child_name + "> of line " + std::to_string(child->line) +
+                               " is not an integer");
+    values.push_back(v);
+  }
+  return values;
+}
+
+/*!
+ * The integers of the child elements with a name, as the seqValue of a
+ * sequence, in decimal as parse_decimal() returns them
+ */
+inline std::vector<std::string> decimal_list(const xml_node& node, const std::string& child_name)
+{
+  std::vector<std::string> values;
+  for (auto child : node.elements(child_name))
+  {
+    std::string v;
+    if (!parse_decimal(child->text, v))
       throw std::runtime_error("Element <" + child_name + "> of line " + std::to_string(child->line) +
                                " is not an integer");
     values.push_back(v);
@@ -939,12 +984,19 @@ private:
   {
     auto bin_key = [](const xml_node& n) { return n.get("type") + "\n" + n.get("name"); };
     merge_children(into, from, "coverpointBin", bin_key, [](xml_node& a, const xml_node& b) {
-      auto range_key = [](const xml_node& n) { return n.get("from") + ":" + n.get("to"); };
+      // the limits in decimal, so that the same values written differently
+      // are the same range; other text is kept as it is
+      auto range_key = [](const xml_node& n) {
+        std::string from = n.get("from"), to = n.get("to");
+        parse_decimal(from, from);
+        parse_decimal(to, to);
+        return from + ":" + to;
+      };
       merge_children_counts(a, b, "range", range_key);
       auto sequence_key = [](const xml_node& n) {
         std::string key;
-        for (auto v : int_list(n, "seqValue"))
-          key += std::to_string(v) + ",";
+        for (auto &v : decimal_list(n, "seqValue"))
+          key += v + ",";
         return key;
       };
       merge_children_counts(a, b, "sequence", sequence_key);
@@ -1060,16 +1112,18 @@ private:
         ranges.push_back(std::make_pair(std::get<0>(range), std::get<1>(range)));
     }
     else {
-      for (auto &intv : data.get_intervals_to_int())
-        ranges.push_back(std::make_pair(std::to_string(intv.first), std::to_string(intv.second)));
+      // the values in full, which may not fit in an int
+      for (auto &intv : data.get_intervals_decimal())
+        ranges.push_back(std::make_pair(intv.first, intv.second));
     }
     std::vector<bool> used(ranges.size(), false);
     for (auto range : bin.elements("range"))
     {
-      const std::string from = range->get("from"), to = range->get("to");
+      std::string from = range->get("from"), to = range->get("to");
+      const bool valid = parse_decimal(from, from) && parse_decimal(to, to);
       size_t i = 0;
-      while (i < ranges.size() && (used[i] || ranges[i].first != from || ranges[i].second != to)) ++i;
-      if (i == ranges.size() || i >= hits.size()) {
+      while (valid && i < ranges.size() && (used[i] || ranges[i].first != from || ranges[i].second != to)) ++i;
+      if (!valid || i == ranges.size() || i >= hits.size()) {
         missing("range " + from + ":" + to + " of bin " + path);
         continue;
       }
@@ -1078,19 +1132,13 @@ private:
       loaded++;
     }
 
-    auto sequences = data.get_sequences_to_int();
+    auto sequences = data.get_sequences_decimal();
     std::vector<bool> seq_used(sequences.size(), false);
     for (auto seq : bin.elements("sequence"))
     {
-      auto values = int_list(*seq, "seqValue");
+      auto values = decimal_list(*seq, "seqValue");
       size_t i = 0;
-      auto same = [&](const std::vector<int>& sequence) {
-        if (sequence.size() != values.size()) return false;
-        for (size_t k = 0; k < values.size(); ++k)
-          if (values[k] != sequence[k]) return false;
-        return true;
-      };
-      while (i < sequences.size() && (seq_used[i] || !same(sequences[i]))) ++i;
+      while (i < sequences.size() && (seq_used[i] || sequences[i] != values)) ++i;
       if (i == sequences.size() || i >= hits.size()) {
         missing("sequence of bin " + path);
         continue;

@@ -58,6 +58,17 @@ template <typename T> class coverpoint;
 template <typename T> class binsof;
 template <typename T> class bin;
 
+/*!
+ * \brief Writes a value of an integral type in decimal, in full: a char
+ * type as a number, and a 64-bit value without truncation
+ */
+template <typename T>
+inline std::string to_decimal(T value)
+{
+  typedef typename std::conditional<std::is_signed<T>::value, long long, unsigned long long>::type wide_t;
+  return std::to_string(static_cast<wide_t>(value));
+}
+
 template <typename T>
 static std::vector<interval_t<T>> reunion(const bin<T>& lhs, const bin<T>& rhs);
 
@@ -416,6 +427,15 @@ public:
     return intervals_int;
   }
 
+  /* function to introspect the bin's intervals, the values in full */
+  std::vector<interval_t<std::string>> get_intervals_decimal() const
+  {
+    std::vector<interval_t<std::string>> intervals_dec;
+    for (auto &intv : intervals)
+      intervals_dec.push_back(interval_t<std::string>(to_decimal(intv.first), to_decimal(intv.second)));
+    return intervals_dec;
+  }
+
   void accept_visitor(covVisitorBase& visitor)
   {
     visitor.visit(*this);
@@ -632,6 +652,16 @@ public:
       intervals_int.push_back({static_cast<int>(inter_it.first),static_cast<int>(inter_it.second)});
     }
     return intervals_int;
+  }
+
+  /* function to introspect the bin's intervals, the values in full */
+  std::vector<interval_t<std::string>> get_intervals_decimal() const
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return bin_data->get_intervals_decimal();
   }
 
   /* Virtual function used to register this bin inside a coverpoint */
@@ -1893,6 +1923,25 @@ public:
     return sequences_int;
   }
 
+  /* the sequences of get_sequences_to_int(), the values in full */
+  std::vector<std::vector<std::string>> get_sequences_decimal() const
+  {
+    std::vector<std::vector<std::string>> sequences_dec;
+    for (auto &seq : sequences)
+    {
+      sequences_dec.push_back(std::vector<std::string>());
+      for (auto value : seq)
+        sequences_dec.back().push_back(to_decimal(value));
+    }
+    for (auto &pattern : patterns)
+    {
+      sequences_dec.push_back(std::vector<std::string>());
+      for (auto value : pattern.shortest)
+        sequences_dec.back().push_back(to_decimal(value));
+    }
+    return sequences_dec;
+  }
+
   /*! Returns the sequence or the transition with a hit count, for the messages */
   std::string sequence_text(size_t index) const
   {
@@ -2273,8 +2322,7 @@ public:
   /*! Writes a value in decimal, a char type as a number */
   static std::string to_decimal(T value)
   {
-    typedef typename std::conditional<std::is_signed<T>::value, long long, unsigned long long>::type wide_t;
-    return std::to_string(static_cast<wide_t>(value));
+    return fc4sc::to_decimal(value);
   }
 
   std::vector<std::tuple<std::string, std::string, uint64_t>> get_unhit_array_range() const
