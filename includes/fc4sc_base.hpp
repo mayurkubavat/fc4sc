@@ -306,6 +306,16 @@ public:
   }
 
   /*!
+   * For a default bin array which has values but no value hit, a range of
+   * its first value with no hits, written in decimal: the file has a bin
+   * of the array for it, so that the coverpoint has a bin. Empty otherwise.
+   */
+  virtual std::vector<std::tuple<std::string, std::string, uint64_t>> get_unhit_array_range() const
+  {
+    return std::vector<std::tuple<std::string, std::string, uint64_t>>();
+  }
+
+  /*!
    * Get the value ranges of a default bin with their hit counts, the
    * values written in decimal, as they may not fit in an int. For a default
    * bin array, as the SystemVerilog "bins b[] = default;", which has a bin
@@ -467,6 +477,16 @@ public:
    *  or nullptr if it is in none */
   cvg_base_data_model* parent_cvg = nullptr;
 
+  /*! Type options of a coverpoint or cross which is in no covergroup */
+  cvp_type_option own_type_option;
+
+  /*!
+   * \brief Returns the type options of this coverpoint or cross, which
+   * are shared by the coverpoints or crosses with its name in all the
+   * instances of its covergroup type
+   */
+  cvp_type_option& type_option();
+
   /*! Visitor function for introspection */
   virtual void accept_visitor(covVisitorBase&) = 0;
 
@@ -514,6 +534,16 @@ public:
 
   /*! Get pointer to data model */
   virtual cvp_base_data_model* get_data() = 0;
+
+  /*!
+   * \brief Returns the type options of this coverpoint or cross, shared by
+   * all the instances of its covergroup type, see \link cvp_type_option
+   * \endlink
+   */
+  cvp_type_option& type_option()
+  {
+    return get_data()->type_option();
+  }
 
   /*!
    * \brief Returns the type coverage of this coverpoint or cross: its
@@ -1178,6 +1208,9 @@ struct cvg_metadata
   /*! Vector of covergroup instances of this covergroup type */
   std::vector<cvg_base_data_model*> cvg_insts;
 
+  /*! Type options of the coverpoints and crosses, by their names */
+  std::map<std::string, cvp_type_option> cvp_type_options;
+
   /*! Destructor */
   virtual ~cvg_metadata()
   {
@@ -1188,6 +1221,35 @@ struct cvg_metadata
   }
 
 };
+
+inline cvp_type_option& cvp_base_data_model::type_option()
+{
+  if (parent_cvg == nullptr || parent_cvg->type_data == nullptr)
+    return own_type_option;
+  return parent_cvg->type_data->cvp_type_options[name];
+}
+
+/*!
+ * \brief Whether a covergroup type gives the options their SystemVerilog
+ * meaning, see cvg_type_option::strict_sv_options
+ */
+inline bool strict_sv_options(const cvg_metadata* type_data)
+{
+  return type_data != nullptr && type_data->type_option.strict_sv_options;
+}
+
+/*!
+ * \brief Whether get_inst_coverage() of a covergroup instance, and of its
+ * coverpoints and crosses, returns the type coverage: as in SystemVerilog,
+ * when merge_instances is set and option.get_inst_coverage is not
+ * \param cvg The covergroup instance, or nullptr for a coverpoint or cross
+ * which is in no covergroup
+ */
+inline bool inst_coverage_is_type_coverage(const cvg_base_data_model* cvg)
+{
+  return cvg != nullptr && strict_sv_options(cvg->type_data) &&
+         cvg->type_data->type_option.merge_instances && !cvg->option.get_inst_coverage;
+}
 
 /*!
  *  \class scp_metadata fc_base.hpp

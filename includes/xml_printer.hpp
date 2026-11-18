@@ -25,7 +25,11 @@
 #ifndef UCIS_PRINTER_HPP
 #define UCIS_PRINTER_HPP
 
+#include <memory>
+#include <sstream>
+
 #include "fc4sc_base.hpp"
+#include "fc4sc_coverage_db.hpp"
 
 typedef enum fc4sc_format {
   ucis_xml = 1
@@ -37,11 +41,11 @@ class xml_printer : public fc4sc::covVisitorBase {
   int gkey = 1;
 
   /*! output stream for xml file */
-  std::ofstream& stream;
+  std::ostream& stream;
 
 public:
 
-  xml_printer(std::ofstream& out_stream) : stream(out_stream) {}
+  xml_printer(std::ostream& out_stream) : stream(out_stream) {}
 
   /*!
    * \brief gets another unique key for UCIS XML generation
@@ -237,28 +241,20 @@ public:
         stream << "<covergroupCoverage ";
         stream << "weight=\"" << type_it.second.front()->type_data->type_option.weight << "\" ";
         stream << ">\n";
-      
 
-      // Print each instance
-      for (size_t i = 0; i < type_it.second.size(); ++i)
-      {
-        if(type_it.second[i]->enable) {
-          stream << "<cgInstance ";
-          stream << "name=\"" << escape_xml_chars(type_it.second[i]->name) << "\" \n";
+        // With strict_sv_options, the instances without per_instance are
+        // written as one instance which holds the type coverage, first
+        std::vector<fc4sc::cvg_base_data_model*> type_insts;
+        for (auto cvg : type_it.second)
+          if (cvg->enable && fc4sc::strict_sv_options(cvg->type_data) && !cvg->option.per_instance)
+            type_insts.push_back(cvg);
+        if (!type_insts.empty())
+          write_type_instance(type_insts);
 
-          stream << "key=\"" << get_unique_key() << "\" \n";
-          stream << "excluded=\""
-                 << "false"
-                 << "\" \n";
-          stream << ">\n";
-
-          type_it.second[i]->accept_visitor(*this);
-
-          stream << "\n";
-          stream << "</cgInstance>\n";
-        }
-      }
-
+        // Print each instance
+        for (auto cvg : type_it.second)
+          if (cvg->enable && std::find(type_insts.begin(), type_insts.end(), cvg) == type_insts.end())
+            write_cg_instance(*cvg);
 
         stream << "</covergroupCoverage>\n";
       }
@@ -287,6 +283,106 @@ public:
     {
       scope_inst_it.second->accept_visitor(*this);
     } 
+  }
+
+  /*! Writes a covergroup instance */
+  void write_cg_instance(fc4sc::cvg_base_data_model& cvg)
+  {
+    stream << "<cgInstance ";
+    stream << "name=\"" << escape_xml_chars(cvg.name) << "\" \n";
+
+    stream << "key=\"" << get_unique_key() << "\" \n";
+    stream << "excluded=\""
+           << "false"
+           << "\" \n";
+    stream << ">\n";
+
+    cvg.accept_visitor(*this);
+
+    stream << "\n";
+    stream << "</cgInstance>\n";
+  }
+
+  /*! A string as it is read back from the file, once escaped */
+  std::string as_written(const std::string& in)
+  {
+    return fc4sc::ucis_db::xml_parser("<a v=\"" + escape_xml_chars(in) + "\"/>", "").parse()->get("v");
+  }
+
+  /*!
+   * \brief Writes the instances of a covergroup type which has the
+   * strict_sv_options type option and which do not have the per_instance
+   * option as one covergroup instance which holds the type coverage. Its
+   * name is empty, so that it is told apart from every instance, which has
+   * a name, and its alias is the name of the type.
+   *
+   *   As in SystemVerilog (IEEE 1800-2017 19.7), the data of an instance
+   * without per_instance is not saved on its own, but it contributes to the
+   * type coverage. The UCIS XML schema has no element for the coverage of a
+   * covergroup type, which readers compute from the covergroup instances of
+   * the type, so the type coverage is written as an instance whose bins
+   * are the union of the bins of these instances, matched by name, with
+   * their counts added up, as for type_option.merge_instances (19.11.3).
+   * Its options are the type options: the weight, goal and comment of the
+   * covergroup type_option and of the type_option of each coverpoint and
+   * cross. Its other options are those of the first instance.
+   * \param insts The instances, at least one
+   */
+  void write_type_instance(const std::vector<fc4sc::cvg_base_data_model*>& insts)
+  {
+    using fc4sc::ucis_db::xml_node;
+    std::unique_ptr<xml_node> record;
+    fc4sc::ucis_db::merger instances;
+    for (auto cvg : insts)
+    {
+      std::ostringstream text;
+      xml_printer printer(text);
+      printer.write_cg_instance(*cvg);
+      auto node = fc4sc::ucis_db::xml_parser(text.str(), "covergroup " + cvg->name).parse();
+      if (!record)
+        record = std::move(node);
+      else
+        instances.merge_instance_bins(*record, *node);
+    }
+
+    const fc4sc::cvg_metadata& type = *insts.front()->type_data;
+    record->set("name", "");
+    record->set("alias", as_written(type.type_name));
+    xml_node* options = record->element("options");
+    if (options != nullptr) {
+      options->set("weight", std::to_string(type.type_option.weight));
+      options->set("goal", std::to_string(type.type_option.goal));
+      options->set("comment", as_written(type.type_option.comment));
+    }
+    xml_node* id = record->element("cgId");
+    xml_node* inst_id = (id != nullptr) ? id->element("cginstSourceId") : nullptr;
+    if (inst_id != nullptr) {
+      inst_id->set("file", std::to_string(type.file_id));
+      inst_id->set("line", std::to_string(type.line));
+    }
+
+    // the type options of the coverpoints and crosses, by their names as
+    // they are written
+    std::map<std::string, cvp_type_option> type_options;
+    for (auto &opt : type.cvp_type_options)
+      type_options[as_written(opt.first)] = opt.second;
+    for (auto &child : record->children)
+    {
+      if (child->name != "coverpoint" && child->name != "cross")
+        continue;
+      xml_node* cvp_options = child->element("options");
+      if (cvp_options == nullptr)
+        continue;
+      const cvp_type_option opt = type_options[child->get("name")];
+      cvp_options->set("weight", std::to_string(opt.weight));
+      cvp_options->set("goal", std::to_string(opt.goal));
+      cvp_options->set("comment", as_written(opt.comment));
+    }
+
+    uint64_t key = static_cast<uint64_t>(gkey);
+    fc4sc::ucis_db::merger::renumber_keys(*record, key);
+    gkey = static_cast<int>(key);
+    fc4sc::ucis_db::write_xml(*record, stream);
   }
 
   void visit(fc4sc::cvg_base_data_model& base)
@@ -550,13 +646,16 @@ public:
    * \brief Writes a default bin. The type "default" of UCIS is the type of
    * the regular bins, which are counted in the coverage, so a default bin is
    * written as an ignore bin, which is not. A default bin array has a bin
-   * for each value hit. A bin without values or hits is not written, as a
-   * bin needs at least one range.
+   * for each value hit. A bin without values is not written, as a bin needs
+   * at least one range. A bin array without hits has a bin for its first
+   * value, with no hits, as a coverpoint needs at least one bin.
    */
   void write_default_bin(fc4sc::bin_base_data_model& base)
   {
     auto ranges = base.get_default_ranges();
     if (base.is_value_array()) {
+      if (ranges.empty())
+        ranges = base.get_unhit_array_range();
       // the values may not fit in an int, so the names use the values
       // written in decimal, which are unique
       for (auto &range : ranges)
@@ -702,8 +801,47 @@ public:
   }
 
   /*!
+   *  \brief Returns the length of the UTF-8 encoded character which starts
+   *  at a byte of a string, or 0 if the bytes there are not a character
+   *  which XML 1.0 allows, encoded as UTF-8 allows
+   *
+   *  \param in The string
+   *  \param idx Index of the first byte, which is not an ASCII character
+   */
+  static size_t utf8_char_length(const std::string &in, std::string::size_type idx) {
+    const unsigned char lead = static_cast<unsigned char>(in[idx]);
+    size_t length;
+    // the range of the second byte, which excludes the overlong encodings,
+    // the surrogates and the values above U+10FFFF
+    unsigned char low = 0x80, high = 0xBF;
+    if (lead >= 0xC2 && lead <= 0xDF) length = 2;
+    else if (lead >= 0xE0 && lead <= 0xEF) {
+      length = 3;
+      if (lead == 0xE0) low = 0xA0;
+      if (lead == 0xED) high = 0x9F;
+    }
+    else if (lead >= 0xF0 && lead <= 0xF4) {
+      length = 4;
+      if (lead == 0xF0) low = 0x90;
+      if (lead == 0xF4) high = 0x8F;
+    }
+    else return 0;
+    if (in.length() - idx < length) return 0;
+    for (size_t k = 1; k < length; ++k) {
+      const unsigned char c = static_cast<unsigned char>(in[idx + k]);
+      if (c < (k == 1 ? low : 0x80) || c > (k == 1 ? high : 0xBF)) return 0;
+    }
+    // U+FFFE and U+FFFF are not allowed in XML 1.0
+    if (lead == 0xEF && static_cast<unsigned char>(in[idx + 1]) == 0xBF &&
+        static_cast<unsigned char>(in[idx + 2]) >= 0xBE) return 0;
+    return length;
+  }
+
+  /*!
    *  \brief Function which returns a string where all XML special characters are escaped,
    *  and the control characters which XML 1.0 does not allow are replaced with '?'.
+   *  The file is encoded as UTF-8: each byte which is not part of a UTF-8 encoded
+   *  character, as the bytes of a Latin-1 string, is also replaced with '?'.
    *
    *  \param in The input string
    */
@@ -722,12 +860,23 @@ public:
         case '\t': out += "&#9;"; break;
         case '\n': out += "&#10;"; break;
         case '\r': out += "&#13;"; break;
-        default:
+        default: {
+          const unsigned char c = static_cast<unsigned char>(in[idx]);
           // the other control characters are not allowed in XML 1.0
-          if (static_cast<unsigned char>(in[idx]) < 0x20)
+          if (c < 0x20)
             out += '?';
-          else
+          else if (c < 0x80)
             out += in[idx];
+          else {
+            const size_t length = utf8_char_length(in, idx);
+            if (length == 0)
+              out += '?';
+            else {
+              out.append(in, idx, length);
+              idx += length - 1;
+            }
+          }
+        }
       }
     }
     return out;

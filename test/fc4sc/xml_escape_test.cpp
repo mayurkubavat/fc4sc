@@ -104,3 +104,26 @@ TEST(xml_escape, file_names_and_control_characters) {
 
   fc4sc::global::delete_context(cntxt);
 }
+
+TEST(xml_escape, bytes_which_are_not_utf8) {
+  auto cntxt = fc4sc::global::create_new_context();
+  // Latin-1 bytes, an overlong encoding, an encoded surrogate, a character
+  // cut short and U+FFFF, which are not allowed in the file; and UTF-8
+  // characters of two, three and four bytes, which are kept
+  xml_escape_cg cg("enc\xe9", __FILE__, __LINE__, cntxt);
+  cg.option().comment = "comment \xff\xfe \xc0\xaf \xed\xa0\x80 \xef\xbf\xbf \xe2\x82";
+  cg.cvp_a.option().comment = "caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x99\x82";
+  cg.sample(0, 0);
+
+  const std::string file = "xml_escape_not_utf8.xml";
+  xml_printer::coverage_save(file, cntxt);
+  const std::string xml = read_file(file);
+
+  EXPECT_NE(xml.find("<cgInstance name=\"enc?\""), std::string::npos);
+  EXPECT_NE(xml.find("comment=\"comment ?? ?? ??? ??? ??\""), std::string::npos);
+  EXPECT_NE(xml.find("comment=\"caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x99\x82\""), std::string::npos);
+  EXPECT_EQ(xml.find('\xe9'), std::string::npos);
+  EXPECT_EQ(xml.find('\xff'), std::string::npos);
+
+  fc4sc::global::delete_context(cntxt);
+}

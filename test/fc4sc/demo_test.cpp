@@ -57,7 +57,7 @@ SCOPE_DECL(main)
   class cg : public fc4sc::covergroup {
     public:
     CG_SCOPED_CONS(cg,main) { }
-    bool flag1, flag2;
+    bool flag1 = false, flag2 = false;
     COVERPOINT(bool,flag1_cvp,flag1) {
       bin<bool>("LOW",false),
       bin<bool>("HIGH",true)
