@@ -859,7 +859,9 @@ public:
   }
 
   /*!
-   *  \brief Computes coverage for this instance
+   *  \brief Computes coverage for this instance. With the strict_sv_options
+   *  and merge_instances type options, it is the type coverage unless the
+   *  get_inst_coverage option of the covergroup instance is set.
    *  \returns Coverage value as a double between 0 and 100
    */
   double get_inst_coverage() const 
@@ -868,6 +870,9 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+
+    if (inst_coverage_is_type_coverage(cvp_data->parent_cvg))
+      return this->get_coverage();
 
     if (bins.empty()) // no bins defined
       return (cvp_data->option.weight == 0) ? 100 : 0;
@@ -882,7 +887,8 @@ public:
   }
 
   /*!
-   *  \brief Computes coverage for this instance
+   *  \brief Computes coverage for this instance, or the type coverage as
+   *  get_inst_coverage()
    *  \param covered Number of covered bins
    *  \param total Total number of bins in this coverpoint
    *  \returns Coverage value as a double between 0 and 100
@@ -893,6 +899,9 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+
+    if (inst_coverage_is_type_coverage(cvp_data->parent_cvg))
+      return this->get_coverage(covered, total);
 
     double res = 0;
     covered = 0;

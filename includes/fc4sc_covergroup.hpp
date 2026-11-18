@@ -210,8 +210,22 @@ public:
     throw("Cannot dynamically disable statically defined covergroup " + this->name());
   }
 
+private:
+
+  /*! The context of the coverage model of this instance */
+  fc4sc::global* coverage_context() const
+  {
+    if (this->parent_scp == nullptr)
+      return fc4sc::global::getter();
+    return this->parent_scp->get_scp_data()->cntxt;
+  }
+
+public:
+
   /*!
-   * \brief Computes coverage of an instance
+   * \brief Computes coverage of an instance. With the strict_sv_options and
+   * merge_instances type options, it is the type coverage unless
+   * option.get_inst_coverage is set, as in SystemVerilog.
    * \returns Coverage percentage of this instance
    */
   double get_inst_coverage()  const 
@@ -220,6 +234,8 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if(this->is_enabled() && inst_coverage_is_type_coverage(cvg_data))
+      return fc4sc::global::get_coverage(cvg_data->type_data->scp_type_name, cvg_data->type_data->type_name, coverage_context());
     if(this->is_enabled()) {
       double res = 0;
       double weights = 0;
@@ -243,7 +259,8 @@ public:
   }
 
   /*!
-   * \brief Computes coverage of an instance
+   * \brief Computes coverage of an instance, or the type coverage as
+   * get_inst_coverage()
    * \param bins_covered Number of covered bins
    * \param total Total number of bins in this covergroup
    * \returns Coverage percentage of this instance
@@ -254,6 +271,9 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if(this->is_enabled() && inst_coverage_is_type_coverage(cvg_data))
+      return fc4sc::global::get_coverage(cvg_data->type_data->scp_type_name, cvg_data->type_data->type_name,
+                                         bins_covered, total, coverage_context());
     if(this->is_enabled()) {
       double res = 0;
       double weights = 0;
