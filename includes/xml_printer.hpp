@@ -100,7 +100,6 @@ public:
     //TODO: Needed information but not filled
     stream << "<historyNodes ";
     stream << "historyNodeId=\"" << 200 << "\" \n";
-    stream << "parentId=\"" << 200 << "\" \n";
     stream << "logicalName=\""
            << "string"
            << "\" \n";

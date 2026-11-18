@@ -36,8 +36,8 @@ using fc4sc::intersection;
 template <typename T>
 void print_arr(std::vector<fc4sc::interval_t<T>> x) {
   for (auto it: x)
-    cerr << "[" << it.first << "," << it.second << "] ";
-  cerr << "\n";
+    std::cerr << "[" << it.first << "," << it.second << "] ";
+  std::cerr << "\n";
 }
 
 int main() {
@@ -53,6 +53,6 @@ int main() {
   test_array[0].sample(80,1,1);
   test_array[0].sample(100,1,1);
 
-  fc4sc::global::coverage_save("results.xml");
+  xml_printer::coverage_save("results.xml");
 
 }
