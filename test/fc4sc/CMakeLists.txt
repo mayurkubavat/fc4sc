@@ -51,7 +51,8 @@ gtest_discover_tests(fc4sc_tests
 # which depend on it are built into a separate executable.
 add_executable(fc4sc_no_throw_tests
   main.cpp
-  illegal_bin_sample_expression_test.cpp)
+  illegal_bin_sample_expression_test.cpp
+  cross_bin_select_test.cpp)
 target_compile_definitions(fc4sc_no_throw_tests PRIVATE FC4SC_NO_THROW)
 target_link_libraries(fc4sc_no_throw_tests PRIVATE FC4SC::fc4sc GTest::gtest)
 

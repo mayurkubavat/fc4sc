@@ -34,6 +34,7 @@
 #ifndef FC4SC_BASE_HPP
 #define FC4SC_BASE_HPP
 
+#include <cstdint>
 #include <map>
 #include <iostream>
 #include <string>
@@ -46,6 +47,7 @@
 #include <unordered_map>
 #include <assert.h>
 #include <memory>
+#include <stdexcept>
 
 #include "fc4sc_options.hpp"
 
@@ -241,7 +243,13 @@ typedef enum
 {
   default_,
   illegal_,
-  ignore_
+  ignore_,
+  /*!
+   * A default bin, as the SystemVerilog "bins b = default;": it holds the
+   * values which are in no other bin, and is not counted in the coverage.
+   * default_ is the type of the regular bins.
+   */
+  default_bin_
 } bin_t;
 
 /*!
@@ -286,6 +294,46 @@ public:
 
   /*! Get intervals in type int */
   virtual std::vector<interval_t<int>> get_intervals_to_int() const = 0;
+
+  /*!
+   * Get the value sequences of a transition bin in type int. The hit
+   * counts in get_interval_hits() belong to these sequences, and a bin has
+   * either intervals or sequences.
+   */
+  virtual std::vector<std::vector<int>> get_sequences_to_int() const
+  {
+    return std::vector<std::vector<int>>();
+  }
+
+  /*!
+   * Get the value ranges of a default bin with their hit counts, the
+   * values written in decimal, as they may not fit in an int. For a default
+   * bin array, as the SystemVerilog "bins b[] = default;", which has a bin
+   * for each value hit, a range of one value for each value hit. Empty for
+   * other bins.
+   */
+  virtual std::vector<std::tuple<std::string, std::string, uint64_t>> get_default_ranges() const
+  {
+    return std::vector<std::tuple<std::string, std::string, uint64_t>>();
+  }
+
+  /*! Whether this is a default bin array, with a bin for each value hit */
+  virtual bool is_value_array() const
+  {
+    return false;
+  }
+
+  /*!
+   * Adds hits to a value of a default bin array, the value written in
+   * decimal. Returns false if this is not a default bin array, or if the
+   * value is not one of its values.
+   */
+  virtual bool add_value_hits(const std::string& value, uint64_t count)
+  {
+    (void)value;
+    (void)count;
+    return false;
+  }
 
   /*! Get name of bin */
   virtual std::string& get_name() = 0;
@@ -415,6 +463,10 @@ public:
   /*! Number of sample misses (no bin hit)*/
   uint64_t misses = 0;
 
+  /*! Data of the covergroup instance this coverpoint or cross is in,
+   *  or nullptr if it is in none */
+  cvg_base_data_model* parent_cvg = nullptr;
+
   /*! Visitor function for introspection */
   virtual void accept_visitor(covVisitorBase&) = 0;
 
@@ -441,6 +493,14 @@ public:
   size_t last_bin_index_hit = 0;
   bool last_sample_success = false;
 
+  /*!
+   * Indices of all the bins hit by the last sample, in increasing order.
+   * A sample can hit several bins of a coverpoint: bins with overlapping
+   * values, or a value bin and transition bins. A cross counts every
+   * combination of them.
+   */
+  std::vector<size_t> last_bins_hit;
+
   virtual cvp_base* create_instance(cvg_base* cvg_inst) = 0;
 
   /*! Instance specific options */
@@ -454,6 +514,21 @@ public:
 
   /*! Get pointer to data model */
   virtual cvp_base_data_model* get_data() = 0;
+
+  /*!
+   * \brief Returns the type coverage of this coverpoint or cross: its
+   * coverage across all the instances of the covergroup type it is in
+   * \returns Double between 0 and 100
+   */
+  virtual double get_coverage() const = 0;
+
+  /*!
+   * \brief Returns the type coverage of this coverpoint or cross
+   * \param covered Number of covered bins, summed over the instances
+   * \param total Total number of bins, summed over the instances
+   * \returns Double between 0 and 100
+   */
+  virtual double get_coverage(int &covered, int &total) const = 0;
 
   /*! Destructor */
   virtual ~cvp_base(){}
@@ -481,6 +556,9 @@ public:
   /*! Vector of pointers to ignore bin data */
   std::vector<bin_base_data_model*> ignore_bins_data;
 
+  /*! Vector of pointers to default bin data, see bin_t::default_bin_ */
+  std::vector<bin_base_data_model*> default_bins_data;
+
   /*! Get reference to sample expression string */
   virtual std::string& get_sample_expression_str() = 0;
 
@@ -497,6 +575,9 @@ public:
       delete bin_it;
     }
     for(auto bin_it : this->ignore_bins_data) {
+      delete bin_it;
+    }
+    for(auto bin_it : this->default_bins_data) {
       delete bin_it;
     }
   }
@@ -528,9 +609,120 @@ public:
   /*! Get vector of ignore bins associated with this coverpoint */
   virtual std::vector<bin_base*> get_ignore_bins_base() = 0;
 
+  /*! Get vector of default bins associated with this coverpoint */
+  virtual std::vector<bin_base*> get_default_bins_base()
+  {
+    return std::vector<bin_base*>();
+  }
+
   /*! Destructor */
   virtual ~coverpoint_base() { }
 
+};
+
+/*!
+ *  \class cross_select_node fc_base.hpp
+ *  \brief Node of a select expression of the bins of a cross
+ *
+ *  A select expression, as binsof(a.b) && !binsof(c) intersect {1},
+ *  selects products of the bins of the crossed coverpoints. A condition
+ *  selects the products which have one of a set of bins of a coverpoint,
+ *  and conditions are combined with !, && and ||. See fc4sc::binsof.
+ */
+class cross_select_node
+{
+public:
+
+  /*! Kind of the node */
+  enum op_t { condition_, not_, and_, or_ };
+
+  op_t op = condition_;
+
+  /*! Operands of !, && and || */
+  std::shared_ptr<const cross_select_node> lhs, rhs;
+
+  /*! Coverpoint of a condition */
+  const cvp_base* cvp = nullptr;
+
+  /*! Returns which bins of the coverpoint a condition selects */
+  std::function<std::vector<bool>()> select_bins;
+
+  /*! Position of the coverpoint in the cross, once resolved */
+  size_t position = 0;
+
+  /*! Bins of the coverpoint selected by a condition, once resolved */
+  std::vector<bool> bins;
+
+  /*!
+   * \brief Checks if a product of bins is selected
+   * \param product The index of a bin of each crossed coverpoint
+   */
+  bool matches(const std::vector<size_t>& product) const
+  {
+    switch (op)
+    {
+      case not_: return !lhs->matches(product);
+      case and_: return lhs->matches(product) && rhs->matches(product);
+      case or_: return lhs->matches(product) || rhs->matches(product);
+      default:
+        return position < product.size() && product[position] < bins.size() &&
+               bins[product[position]];
+    }
+  }
+
+  /*!
+   * \brief Returns a copy of this expression whose conditions know the
+   * positions and the selected bins of their coverpoints in a cross
+   * \param cvps The crossed coverpoints
+   */
+  std::shared_ptr<const cross_select_node> resolve(const std::vector<cvp_base*>& cvps) const
+  {
+    std::shared_ptr<cross_select_node> node = std::make_shared<cross_select_node>(*this);
+    if (op != condition_) {
+      node->lhs = lhs->resolve(cvps);
+      if (rhs) node->rhs = rhs->resolve(cvps);
+      return node;
+    }
+    auto it = std::find(cvps.begin(), cvps.end(), cvp);
+    if (it == cvps.end())
+      throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
+    node->position = it - cvps.begin();
+    node->bins = select_bins();
+    return node;
+  }
+};
+
+/*!
+ *  \class cross_bin_data_model fc_base.hpp
+ *  \brief Data of a user defined bin of a cross
+ *
+ *  A user defined bin of a cross holds the products of bins which its
+ *  select expression selects, as the SystemVerilog
+ *  "bins b = binsof(a.lo) && binsof(c);". An ignore bin or an illegal bin
+ *  of a cross has the type bin_t::ignore_ or bin_t::illegal_.
+ */
+class cross_bin_data_model
+{
+public:
+
+  /*! Name of the bin */
+  std::string name;
+
+  /*! Type of the bin: default_, ignore_ or illegal_ */
+  bin_t bin_type = default_;
+
+  /*! Select expression of the bin */
+  std::shared_ptr<const cross_select_node> select;
+
+  /*!
+   * Number of products of bins in the bin. The products of an ignore
+   * or illegal bin are not in the other bins. A bin without products is
+   * not counted in the coverage.
+   */
+  uint64_t size = 0;
+
+  /*! Number of samples which hit the bin */
+  uint64_t hits = 0;
 };
 
 /*!
@@ -549,8 +741,67 @@ public:
   /*! Vector of crossed coverpoints */
   std::vector<cvp_base_data_model*> cross_cvps;
 
+  /*!
+   * User defined bins, ignore bins and illegal bins of the cross. When
+   * there are any, get_cross_bins() holds the hits of the automatically
+   * created bins only: the products of bins which are in none of them.
+   */
+  std::vector<cross_bin_data_model> user_bins;
+
+  /*! Number of automatically created bins, when there are user_bins */
+  uint64_t auto_bins_size = 0;
+
   /*! Get cross bins */
   virtual const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const = 0;
+
+  /*!
+   * \brief Adds hits to an automatically created bin
+   * \param product The index of a bin of each crossed coverpoint
+   * \param count Number of hits to add
+   */
+  virtual void add_cross_bin_hits(const std::vector<size_t>& product, uint64_t count) = 0;
+
+  /*!
+   * \brief Checks if a product of bins is an automatically created bin,
+   * which is in no user defined bin, ignore bin or illegal bin
+   * \param product The index of a bin of each crossed coverpoint
+   */
+  bool is_auto_bin(const std::vector<size_t>& product) const
+  {
+    for (auto &bin : user_bins)
+      if (bin.select->matches(product))
+        return false;
+    return true;
+  }
+
+  /*!
+   * \brief Counts the bins of the cross which are in its coverage: the
+   * automatically created bins and the user defined bins which have
+   * products of bins, without the ignore and illegal bins
+   * \param covered Returns the number of bins hit at least option.at_least times
+   * \param total Returns the number of bins
+   */
+  void get_coverage_bins(int &covered, int &total) const
+  {
+    covered = 0;
+    if (user_bins.empty()) {
+      total = 1;
+      for (auto cvp : cross_cvps)
+        total *= cvp->size();
+    }
+    else {
+      total = auto_bins_size;
+      for (auto &bin : user_bins)
+      {
+        if (bin.bin_type != default_ || bin.size == 0)
+          continue;
+        total++;
+        covered += (bin.hits >= option.at_least);
+      }
+    }
+    for (auto &bin : get_cross_bins())
+      covered += (bin.second >= option.at_least);
+  }
 
 };
 
@@ -616,6 +867,7 @@ public:
   /*! Add coverpoint/cross data to the covergroup */
   void add_cvp_data(cvp_base_data_model* cvp_data)
   {
+    cvp_data->parent_cvg = this;
     cvps.push_back(cvp_data);
   }
   
