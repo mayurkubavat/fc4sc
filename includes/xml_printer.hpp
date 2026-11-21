@@ -69,8 +69,9 @@ public:
     stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
            << "\n";
     stream << "<UCIS xmlns=\"UCIS\" xmlns:ucis=\"http://www.w3.org/2001/XMLSchema-instance\" ucisVersion=\"1.0\" ";
+    const char* writer = getenv("USER");
     stream << " writtenBy=\""
-           << getenv("USER")
+           << escape_xml_chars(writer ? writer : "")
            << "\"\n";
 
     std::time_t cur_time = std::time(0);
@@ -89,7 +90,7 @@ public:
     {
       stream << "<sourceFiles ";
       stream << " fileName=\""
-	     << fname_it.second
+	     << escape_xml_chars(fname_it.second)
 	     << "\"";
       stream << " id=\""
              << fname_it.first
@@ -149,8 +150,9 @@ public:
 	   << time_now->tm_sec/10 << time_now->tm_sec%10
            << "\" \n";
       
+    const char* user = getenv("USER");
     stream << "userName=\""
-           << getenv("USER")
+           << escape_xml_chars(user ? user : "")
            << "\" \n";
     /*
     stream << "cost=\""
@@ -199,10 +201,10 @@ public:
   {
     stream << "<instanceCoverages ";
     stream << "name=\""
-           << base.name
+           << escape_xml_chars(base.name)
            << "\" \n";
     stream << "moduleName=\""
-           << base.type_data->type_name
+           << escape_xml_chars(base.type_data->type_name)
     	   << "\" \n";
     stream << "key=\"" << get_unique_key() << "\" \n";
     stream << "instanceId=\"" << base.instance_id << "\" \n";
@@ -242,7 +244,7 @@ public:
       {
         if(type_it.second[i]->enable) {
           stream << "<cgInstance ";
-          stream << "name=\"" << type_it.second[i]->name << "\" \n";
+          stream << "name=\"" << escape_xml_chars(type_it.second[i]->name) << "\" \n";
 
           stream << "key=\"" << get_unique_key() << "\" \n";
           stream << "excluded=\""
@@ -269,11 +271,11 @@ public:
       {
         if(!type_it.second[i]->enable) {
           stream << "<userAttr ";
-  	  stream << "key=\"" << type_it.second[i]->type_data->type_name << "\" \n";
+  	  stream << "key=\"" << escape_xml_chars(type_it.second[i]->type_data->type_name) << "\" \n";
           stream << "type=\"str\"\n";
 	  stream << "len=\"" << type_it.second[i]->type_data->type_name.size() << "\"\n";
 	  stream << ">\n";
-	  stream << type_it.second[i]->type_data->type_name;
+	  stream << escape_xml_chars(type_it.second[i]->type_data->type_name);
 	  stream << "</userAttr>\n";
 	}
       }
@@ -293,7 +295,7 @@ public:
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
     stream << "goal=\"" << inst.goal << "\" ";
-    stream << "comment=\"" << inst.comment << "\" ";
+    stream << "comment=\"" << escape_xml_chars(inst.comment) << "\" ";
     stream << "at_least=\"" << inst.at_least << "\" ";
     stream << "auto_bin_max=\"" << inst.auto_bin_max << "\" ";
     stream << "detect_overlap=\"" << inst.detect_overlap << "\" ";
@@ -304,11 +306,17 @@ public:
     else {
       stream << "per_instance=\"false\" ";
     }
+    if(base.type_data->type_option.merge_instances) {
+      stream << "merge_instances=\"true\" ";
+    }
+    else {
+      stream << "merge_instances=\"false\" ";
+    }
     stream << "/>\n";
 
     stream << "<cgId cgName=\"" << escape_xml_chars(base.type_data->type_name) << "\" ";
     stream << "moduleName=\""
-           <<  base.type_data->scp_type_name
+           <<  escape_xml_chars(base.type_data->scp_type_name)
            << "\">\n";
 
     stream << "<cginstSourceId file=\""
@@ -346,7 +354,7 @@ public:
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
     stream << "goal=\"" << inst.goal << "\" ";
-    stream << "comment=\"" << inst.comment << "\" ";
+    stream << "comment=\"" << escape_xml_chars(inst.comment) << "\" ";
     stream << "at_least=\"" << inst.at_least << "\" ";
     stream << "auto_bin_max=\"" << inst.auto_bin_max << "\" ";
     stream << "detect_overlap=\"" << inst.detect_overlap << "\" ";
@@ -357,6 +365,8 @@ public:
     for (auto bin : base.illegal_bins_data)
       bin->accept_visitor(*this);
     for (auto bin : base.ignore_bins_data)
+      bin->accept_visitor(*this);
+    for (auto bin : base.default_bins_data)
       bin->accept_visitor(*this);
 
     stream << "</coverpoint>\n\n";
@@ -371,12 +381,11 @@ public:
            << "\" ";
     stream << ">\n";
     
-  //TODO: cross_num_print_missing is unimplemented
     auto& inst = base.option;
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
     stream << "goal=\"" << inst.goal << "\" ";
-    stream << "comment=\"" << inst.comment << "\" ";
+    stream << "comment=\"" << escape_xml_chars(inst.comment) << "\" ";
     stream << "at_least=\"" << inst.at_least << "\" ";
     stream << "cross_num_print_missing=\"" << inst.cross_num_print_missing << "\" ";
     stream << "/>\n";
@@ -384,26 +393,147 @@ public:
 
     for (auto &cvp : base.cross_cvps)
     {
-      stream << "<crossExpr>" << cvp->name << "</crossExpr> \n";
+      stream << "<crossExpr>" << escape_xml_chars(cvp->name) << "</crossExpr> \n";
     }
 
-    auto cross_bins = base.get_cross_bins();
+    // Write the bins of the cross which were hit, and the missing bins
+    // (never hit) up to option.cross_num_print_missing, as in SystemVerilog.
+    // A reader of the file only knows the bins found in it, so the coverage
+    // it computes is too high when missing bins are left out. Define
+    // FC4SC_SAVE_ALL_CROSS_BINS to write every missing bin.
+    const auto& cross_bins = base.get_cross_bins();
+    size_t bins_written = 0;
 
-    if (cross_bins.empty())
+    auto write_bin = [&](const std::vector<size_t>& indices, uint64_t count)
     {
-      //edge case where crossbin is never sampled
+      bins_written++;
+      // The name is made of the bin indices, as in <0,1>. Readers of UCIS
+      // files tell the bins of a cross apart by their names, and add up
+      // the counts of bins with the same name when files are merged.
       stream << "<crossBin \n";
-      stream << "name=\""
-             << ""
-             << "\"  \n";
+      stream << "name=\"&lt;";
+      for (size_t i = 0; i < indices.size(); i++)
+        stream << (i == 0 ? "" : ",") << indices[i];
+      stream << "&gt;\"  \n";
       stream << "key=\"" << get_unique_key() << "\" \n";
-      stream << "type=\""
-             << "ignore"
-             << "\" \n";
+      //Cannot specify type attribute b/c URG bug
+      //stream << "type=\""
+      //       << "default"
+      //       << "\" \n";
+
       stream << "> \n";
 
-      for (unsigned int i = 0; i < base.get_cross_bins().size(); i++) 
-       stream << "<index>" << 0 << "</index>\n";
+      for (auto& index : indices)
+        stream << "<index>" << index << "</index>\n";
+
+      stream << "<contents \n";
+      stream << "coverageCount=\"" << count << "\"> \n";
+      stream << "</contents> \n";
+
+      stream << "</crossBin> \n";
+    };
+
+    // number of bins of each crossed coverpoint
+    std::vector<size_t> sizes;
+    bool has_bins = !base.cross_cvps.empty();
+
+    for (auto &cvp : base.cross_cvps)
+    {
+      sizes.push_back(cvp->size());
+      has_bins = has_bins && (cvp->size() != 0);
+    }
+
+    // The bins are written in the order of their indices, the last
+    // coverpoint counting fastest, which is also the order of cross_bins.
+    std::vector<size_t> indices(sizes.size(), 0);
+
+#ifdef FC4SC_SAVE_ALL_CROSS_BINS
+    const bool all_missing = true;
+    const uint64_t missing_limit = 0;
+#else
+    const bool all_missing = false;
+    // The schema requires at least one crossBin: when no bin was hit, the
+    // first missing bin is written even if no missing bins are requested.
+    uint64_t missing_limit = inst.cross_num_print_missing;
+    if (cross_bins.empty() && missing_limit == 0)
+      missing_limit = 1;
+#endif
+
+    // Visit the combinations while missing bins are still to be written
+    uint64_t missing_written = 0;
+
+    while (has_bins && (all_missing || missing_written < missing_limit))
+    {
+      auto hit = cross_bins.find(indices);
+
+      if (hit != cross_bins.end())
+        write_bin(indices, hit->second);
+      else if (base.user_bins.empty() || base.is_auto_bin(indices))
+      {
+        // a product of bins in a user defined bin is not a bin
+        write_bin(indices, 0);
+        missing_written++;
+      }
+
+      // advance to the next combination, the last coverpoint counts fastest
+      size_t pos = indices.size();
+      while (pos > 0 && ++indices[pos - 1] == sizes[pos - 1])
+      {
+        indices[pos - 1] = 0;
+        pos--;
+      }
+      has_bins = (pos != 0);
+    }
+
+    // then only the remaining bins which were hit
+    if (has_bins)
+    {
+      for (auto it = cross_bins.lower_bound(indices); it != cross_bins.end(); it++)
+        write_bin(it->first, it->second);
+    }
+
+    // The user defined bins, by name. They have the index -1, for no bin,
+    // for every crossed coverpoint, as they have no single product of bins.
+    // The ignore and illegal bins, and a user defined bin without products,
+    // are not counted in the coverage, so they are not written: readers of
+    // UCIS files may not look at the type of a crossBin, and would count
+    // them.
+    for (auto &bin : base.user_bins)
+    {
+      if (bin.bin_type != fc4sc::bin_t::default_ || bin.size == 0)
+        continue;
+      bins_written++;
+      stream << "<crossBin \n";
+      stream << "name=\"" << escape_xml_chars(bin.name) << "\"  \n";
+      stream << "key=\"" << get_unique_key() << "\" \n";
+      stream << "> \n";
+
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << "<index>" << -1 << "</index>\n";
+
+      stream << "<contents \n";
+      stream << "coverageCount=\"" << bin.hits << "\"> \n";
+      stream << "</contents> \n";
+
+      stream << "</crossBin> \n";
+    }
+
+    // A cross has no bins when one of its coverpoints has none, but the
+    // schema requires at least one crossBin. Write a single ignore bin
+    // instead, with the index -1, for no bin, for every crossed coverpoint.
+    if (bins_written == 0)
+    {
+      stream << "<crossBin \n";
+      stream << "name=\"&lt;";
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << (i == 0 ? "" : ",") << -1;
+      stream << "&gt;\"  \n";
+      stream << "key=\"" << get_unique_key() << "\" \n";
+      stream << "type=\"ignore\" \n";
+      stream << "> \n";
+
+      for (size_t i = 0; i < sizes.size(); i++)
+        stream << "<index>" << -1 << "</index>\n";
 
       stream << "<contents \n";
       stream << "coverageCount=\"" << 0 << "\"> \n";
@@ -412,35 +542,64 @@ public:
       stream << "</crossBin> \n";
     }
 
-    for (auto& bin : cross_bins)
-    {
-      stream << "<crossBin \n";
-      stream << "name=\""
-             << ""
-             << "\"  \n";
-      stream << "key=\"" << get_unique_key() << "\" \n";
-      //Cannot specify type attribute b/c URG bug
-      //stream << "type=\""
-      //       << "default"
-      //       << "\" \n";
-    
-      stream << "> \n";
-
-      for (auto& index : bin.first)
-        stream << "<index>" << index << "</index>\n";
-
-      stream << "<contents \n";
-      stream << "coverageCount=\"" << bin.second << "\"> \n";
-      stream << "</contents> \n";
-
-      stream << "</crossBin> \n";
-    }
 
       stream << "</cross>\n"; 
   }
 
+  /*!
+   * \brief Writes a default bin. The type "default" of UCIS is the type of
+   * the regular bins, which are counted in the coverage, so a default bin is
+   * written as an ignore bin, which is not. A default bin array has a bin
+   * for each value hit. A bin without values or hits is not written, as a
+   * bin needs at least one range.
+   */
+  void write_default_bin(fc4sc::bin_base_data_model& base)
+  {
+    auto ranges = base.get_default_ranges();
+    if (base.is_value_array()) {
+      // the values may not fit in an int, so the names use the values
+      // written in decimal, which are unique
+      for (auto &range : ranges)
+        write_ignore_bin(base.get_name() + "[" + std::get<0>(range) + "]",
+                         std::vector<std::tuple<std::string, std::string, uint64_t>>(1, range));
+    }
+    else if (!ranges.empty()) {
+      write_ignore_bin(base.get_name(), ranges);
+    }
+  }
+
+  /*!
+   * \brief Writes an ignore bin of a coverpoint
+   * \param name Name of the bin
+   * \param ranges Its ranges, from and to in decimal, with their hit counts
+   */
+  void write_ignore_bin(const std::string& name,
+                        const std::vector<std::tuple<std::string, std::string, uint64_t>>& ranges)
+  {
+    stream << "<coverpointBin name=\"" << escape_xml_chars(name) << "\" \n";
+    stream << "key=\"" << get_unique_key() << "\" \n";
+    stream << "type=\"ignore\" >\n";
+    for (auto &range : ranges)
+    {
+      stream << "<range \n"
+             << "from=\"" << std::get<0>(range) << "\" \n"
+             << "to =\"" << std::get<1>(range) << "\"\n"
+             << ">\n";
+      stream << "<contents "
+             << "coverageCount=\"" << std::get<2>(range) << "\">";
+      stream << "</contents>\n";
+      stream << "</range>\n\n";
+    }
+    stream << "</coverpointBin>\n";
+  }
+
   void visit(fc4sc::bin_base_data_model& base)
   {
+    if (base.get_bin_type() == fc4sc::bin_t::default_bin_) {
+      write_default_bin(base);
+      return;
+    }
+
     stream << "<coverpointBin name=\"" << escape_xml_chars(base.get_name()) << "\" \n";
  
     stream << "key=\"" << get_unique_key() << "\" \n";
@@ -455,6 +614,7 @@ public:
         ucis_bin_type = "illegal";
 	break;
       case fc4sc::bin_t::ignore_:
+      case fc4sc::bin_t::default_bin_:
         ucis_bin_type = "ignore";
 	break;
     }
@@ -482,16 +642,32 @@ public:
       stream << "</range>\n\n";
     }
 
+    // Print each sequence of a transition bin
+    auto bin_sequences = base.get_sequences_to_int();
+    for (size_t i = 0; i < bin_sequences.size(); ++i)
+    {
+      stream << "<sequence>\n";
+      stream << "<contents "
+             << "coverageCount=\"" << interval_hits[i] << "\">";
+      stream << "</contents>\n";
+      for (auto value : bin_sequences[i])
+        stream << "<seqValue>" << value << "</seqValue>\n";
+      stream << "</sequence>\n\n";
+    }
+
     stream << "</coverpointBin>\n";
 
   }
 
   /*!
    * \brief Prints data to the given file name
-   * \param file_name Where to print. Returns if empty
+   * \param name Where to print. When it is empty, the name set by
+   * fc4sc::global::set_coverage_db_name() is used, and nothing is printed if
+   * there is none
    */
-  static void coverage_save(const std::string &file_name = "", fc4sc::global* cntxt = fc4sc::global::getter(), const fc4sc_format how = fc4sc_format::ucis_xml)
+  static void coverage_save(const std::string &name = "", fc4sc::global* cntxt = fc4sc::global::getter(), const fc4sc_format how = fc4sc_format::ucis_xml)
   {
+    const std::string file_name = name.empty() ? fc4sc::global::get_coverage_db_name(cntxt) : name;
     if (file_name.empty()) {
       std::cerr << "FC4SC " << __FUNCTION__ << ": Error! Function was passed "
 	  "empty string as the file name\n";
@@ -526,7 +702,8 @@ public:
   }
 
   /*!
-   *  \brief Function which returns a string where all XML special characters are escaped.
+   *  \brief Function which returns a string where all XML special characters are escaped,
+   *  and the control characters which XML 1.0 does not allow are replaced with '?'.
    *
    *  \param in The input string
    */
@@ -540,7 +717,17 @@ public:
         case '&': out += "&amp;"; break;
         case '\"': out += "&quot;"; break;
         case '\'': out += "&apos;"; break;
-        default: out += in[idx];
+        // white space is written as references, so that it is kept in
+        // attribute values
+        case '\t': out += "&#9;"; break;
+        case '\n': out += "&#10;"; break;
+        case '\r': out += "&#13;"; break;
+        default:
+          // the other control characters are not allowed in XML 1.0
+          if (static_cast<unsigned char>(in[idx]) < 0x20)
+            out += '?';
+          else
+            out += in[idx];
       }
     }
     return out;

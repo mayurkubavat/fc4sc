@@ -57,15 +57,28 @@ namespace fc4sc {
 #include "fc4sc_covergroup.hpp"
 #include "fc4sc_scope.hpp"
 #include "xml_printer.hpp"
+#include "fc4sc_coverage_db.hpp"
 
 using fc4sc::interval;
 using fc4sc::bin;
 using fc4sc::bin_array;
+using fc4sc::default_bin;
+using fc4sc::default_bin_array;
 using fc4sc::binsof;
 using fc4sc::ignore_bin;
 using fc4sc::illegal_bin;
+using fc4sc::wildcard;
+using fc4sc::wildcard_values;
 using fc4sc::coverpoint;
 using fc4sc::cross;
 using fc4sc::covergroup;
+using fc4sc::trans;
+using fc4sc::transition_bin;
+using fc4sc::transition_bin_array;
+using fc4sc::illegal_transition_bin;
+using fc4sc::ignore_transition_bin;
+using fc4sc::cross_bin;
+using fc4sc::ignore_cross_bin;
+using fc4sc::illegal_cross_bin;
 
 #endif /* FC4SC_HPP */
