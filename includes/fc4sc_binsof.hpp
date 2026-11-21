@@ -162,10 +162,13 @@ class binsof : public select_expression
       for (auto &intv : data->intervals)
         selected[i] = selected[i] || has_value(intv.first, intv.second);
       auto trans_data = dynamic_cast<transition_bin_data_model<T>*>(data);
-      if (trans_data != nullptr)
+      if (trans_data != nullptr) {
         for (auto &seq : trans_data->sequences)
           for (auto value : seq)
             selected[i] = selected[i] || has_value(value, value);
+        for (auto &intv : trans_data->get_pattern_values())
+          selected[i] = selected[i] || has_value(intv.first, intv.second);
+      }
     }
     if (!found) {
       // as in SystemVerilog, the ignore and illegal bins of a coverpoint

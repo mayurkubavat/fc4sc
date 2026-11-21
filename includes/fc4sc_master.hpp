@@ -360,7 +360,9 @@ private:
  * the merged bins as if they were the bins of a single instance. Cross bins
  * are merged in the same way, by the names of the bins they are made of.
  * The at_least, goal and weight options of a merged coverpoint or cross are
- * those of the first enabled instance which has it.
+ * those of the first enabled instance which has it. With the
+ * strict_sv_options type option, the weight and goal are those of the
+ * type_option of the coverpoint or cross, as in SystemVerilog.
  */
 class merged_coverage : public covVisitorBase
 {
@@ -418,6 +420,21 @@ class merged_coverage : public covVisitorBase
     return keys;
   }
 
+  /*! Sets the options of a merged coverpoint or cross from its first instance */
+  template <typename O>
+  static void set_options(merged_cvp& merged, cvp_base_data_model& base, const O& option)
+  {
+    merged.at_least = option.at_least;
+    if (base.parent_cvg != nullptr && strict_sv_options(base.parent_cvg->type_data)) {
+      merged.weight = base.type_option().weight;
+      merged.goal = base.type_option().goal;
+    }
+    else {
+      merged.weight = option.weight;
+      merged.goal = option.goal;
+    }
+  }
+
   merged_cvp& get_merged(const std::string& name, bool is_cross)
   {
     if (cvps.count(name) == 0) {
@@ -445,11 +462,8 @@ public:
   {
     bool first = (cvps.count(base.name) == 0);
     merged_cvp& merged = get_merged(base.name, false);
-    if (first) {
-      merged.weight = base.option.weight;
-      merged.goal = base.option.goal;
-      merged.at_least = base.option.at_least;
-    }
+    if (first)
+      set_options(merged, base, base.option);
 
     std::vector<bin_key_t> keys = bin_keys(&base);
     for (size_t i = 0; i < keys.size(); ++i)
@@ -466,9 +480,7 @@ public:
     bool first = (cvps.count(base.name) == 0);
     merged_cvp& merged = get_merged(base.name, true);
     if (first) {
-      merged.weight = base.option.weight;
-      merged.goal = base.option.goal;
-      merged.at_least = base.option.at_least;
+      set_options(merged, base, base.option);
       merged.has_user_bins = !base.user_bins.empty();
       merged.auto_bins_size = base.auto_bins_size;
     }
@@ -873,6 +885,10 @@ public:
    * coverage of the covergroup. It is 100 if no instance is enabled or all
    * the weights are 0. A coverpoint or cross which is in no covergroup is
    * its only instance.
+   *   With the strict_sv_options type option, the weight of each instance
+   * is the option.weight of the coverpoint or cross in that instance, as in
+   * SystemVerilog, and the coverage is 100 when it reaches the goal of the
+   * type_option of the coverpoint or cross.
    * \param cvp Data of the coverpoint or cross
    * \param covered Number of covered bins, summed over the instances
    * \param total Total number of bins, summed over the instances
@@ -886,6 +902,7 @@ public:
     std::vector<cvp_base_data_model*> insts;
     std::vector<double> weights;
     cvg_base_data_model* cvg = cvp->parent_cvg;
+    const bool strict = (cvg != nullptr && strict_sv_options(cvg->type_data));
 
     if (cvg == nullptr || cvg->type_data == nullptr) {
       insts.push_back(cvp);
@@ -915,13 +932,20 @@ public:
     {
       general_coverage data_visitor;
       insts[i]->accept_visitor(data_visitor);
+      // the option.weight of the coverpoint or cross in this instance
+      const double weight = strict ? data_visitor.cvp_weight : weights[i];
       covered += data_visitor.bin_covered;
       total += data_visitor.bin_total;
-      res += data_visitor.cvp_res * weights[i];
-      weight_sum += weights[i];
+      res += data_visitor.cvp_res * weight;
+      weight_sum += weight;
     }
 
-    return (weight_sum == 0) ? 100 : res / weight_sum;
+    if (weight_sum == 0)
+      return 100;
+    const double real = res / weight_sum;
+    if (strict && real >= cvp->type_option().goal)
+      return 100;
+    return real;
   }
 
   static bool is_empty(fc4sc::global* cvg_cntxt = fc4sc::global::getter())

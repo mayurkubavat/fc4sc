@@ -722,6 +722,38 @@ public:
       renumber_keys(*child, next);
   }
 
+  /*!
+   * \brief Merges the bins of a covergroup instance (cgInstance) into
+   * another instance of the same covergroup type, as the union of their
+   * bins
+   *
+   *   The bins of the coverpoints are matched as in merge(), by their names.
+   * The instances may have different bins, so the bins of the crosses are
+   * matched by the names of the coverpoint bins they are made of, as in
+   * SystemVerilog (IEEE 1800-2017 19.11.3), and their indices and names are
+   * those of the merged coverpoint bins. The user defined cross bins are
+   * matched by their names. The options of into are kept.
+   */
+  void merge_instance_bins(xml_node& into, const xml_node& from)
+  {
+    merge_children(into, from, "coverpoint", name_key, [this](xml_node& a, const xml_node& b) {
+      merge_coverpoint(a, b);
+    });
+    keyed_children crosses(into, "cross", name_key);
+    for (auto crs : from.elements("cross"))
+    {
+      std::unique_ptr<xml_node> copy = crs->clone();
+      reindex_cross_bins(*copy, from, into);
+      xml_node* match = crosses.match(name_key(*crs));
+      if (match != nullptr) {
+        merge_children_counts(*match, *copy, "crossBin", name_key);
+        continue;
+      }
+      crosses.add(name_key(*crs), copy.get());
+      insert_child(into, std::move(copy));
+    }
+  }
+
 private:
 
   /*! The ids of the source files and instances of from, in into */
@@ -881,6 +913,79 @@ private:
     return node.get("name");
   }
 
+  /*! The coverpoint of a covergroup instance with a name, or nullptr */
+  static const xml_node* find_coverpoint(const xml_node& cg, const std::string& name)
+  {
+    for (auto cvp : cg.elements("coverpoint"))
+      if (cvp->get("name") == name) return cvp;
+    return nullptr;
+  }
+
+  /*!
+   * The keys of the regular bins of a coverpoint, in their order, which is
+   * the order of the indices of the cross bins: the name of each bin and
+   * its occurrence among the bins of that name
+   */
+  static std::vector<std::string> regular_bin_keys(const xml_node* cvp)
+  {
+    std::vector<std::string> keys;
+    if (cvp == nullptr) return keys;
+    std::map<std::string, size_t> seen;
+    for (auto bin : cvp->elements("coverpointBin"))
+    {
+      if (bin->get("type") != "default") continue;
+      const std::string& name = bin->get("name");
+      keys.push_back(name + "\n" + std::to_string(seen[name]++));
+    }
+    return keys;
+  }
+
+  /*!
+   * Changes the indices of the bins of a cross of a covergroup instance
+   * from, and their names, to the indices of the same coverpoint bins in
+   * the covergroup instance into, which has all the bins of from. The bins
+   * which are not a product of coverpoint bins are kept as they are.
+   */
+  static void reindex_cross_bins(xml_node& crs, const xml_node& from, const xml_node& into)
+  {
+    std::vector<std::vector<std::string>> from_keys;
+    std::vector<std::map<std::string, size_t>> into_index;
+    for (auto expr : crs.elements("crossExpr"))
+    {
+      const std::string& text = expr->text;
+      const size_t first = text.find_first_not_of(" \t\r\n");
+      const size_t last = text.find_last_not_of(" \t\r\n");
+      const std::string name = (first == std::string::npos) ? std::string() : text.substr(first, last - first + 1);
+      from_keys.push_back(regular_bin_keys(find_coverpoint(from, name)));
+      into_index.push_back(std::map<std::string, size_t>());
+      auto keys = regular_bin_keys(find_coverpoint(into, name));
+      for (size_t i = 0; i < keys.size(); ++i)
+        into_index.back()[keys[i]] = i;
+    }
+    for (auto bin : crs.elements("crossBin"))
+    {
+      auto indices = int_list(*bin, "index");
+      if (indices.size() != from_keys.size()) continue;
+      std::vector<size_t> mapped;
+      for (size_t d = 0; d < indices.size(); ++d)
+      {
+        if (indices[d] < 0 || static_cast<uint64_t>(indices[d]) >= from_keys[d].size()) break;
+        auto it = into_index[d].find(from_keys[d][static_cast<size_t>(indices[d])]);
+        if (it == into_index[d].end()) break;
+        mapped.push_back(it->second);
+      }
+      if (mapped.size() != indices.size()) continue;
+      std::string name = "<";
+      auto index_nodes = bin->elements("index");
+      for (size_t d = 0; d < mapped.size(); ++d)
+      {
+        index_nodes[d]->text = std::to_string(mapped[d]);
+        name += (d == 0 ? "" : ",") + std::to_string(mapped[d]);
+      }
+      bin->set("name", name + ">");
+    }
+  }
+
   /*! Merges the children with a name, matched by a key, with a function */
   template <typename K, typename M>
   void merge_children(xml_node& into, const xml_node& from, const std::string& child_name,
@@ -1021,6 +1126,16 @@ private:
       for (auto data : type_it.second)
         if (data->name == name && data->type_data->type_name == type &&
             data->type_data->scp_type_name == scp_type)
+          cvg = data;
+    // the covergroup instance with an empty name which holds the type
+    // coverage of the instances without per_instance, with the
+    // strict_sv_options type option: its counts are added to the first of
+    // these instances
+    for (auto &type_it : scp.cvgs)
+      for (auto data : type_it.second)
+        if (cvg == nullptr && name.empty() && data->type_data->type_name == type &&
+            data->type_data->scp_type_name == scp_type &&
+            strict_sv_options(data->type_data) && data->enable && !data->option.per_instance)
           cvg = data;
     if (cvg == nullptr) {
       missing("covergroup " + path + "/" + name + " of type " + type);
@@ -1213,7 +1328,11 @@ private:
  * names, the bins of a coverpoint by their names and types, their ranges by
  * their limits and their sequences by their values, the automatically
  * created bins of a cross by their indices and its user defined bins by
- * their names. The elements of the file which match nothing in the model
+ * their names. The covergroup instance with an empty name, which holds
+ * the type coverage of the instances without option.per_instance of a type
+ * with the strict_sv_options type option, is loaded into the first enabled
+ * instance of that type without option.per_instance. The elements of the
+ * file which match nothing in the model
  * are reported as warnings and left out. The misses of the coverpoints and
  * crosses are not in the file, so they are not loaded.
  *

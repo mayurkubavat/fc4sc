@@ -155,6 +155,22 @@ private:
   std::function<T()> sample_expression;
 
   /*!
+   *  \brief Copies the data of a bin, as the data of its type, with the hit
+   *  counts cleared
+   */
+  static bin_data_model<T>* copy_bin_data(const bin_data_model<T>* data)
+  {
+    bin_data_model<T>* copy;
+    auto trans_data = dynamic_cast<const transition_bin_data_model<T>*>(data);
+    if (trans_data != nullptr)
+      copy = new transition_bin_data_model<T>(*trans_data);
+    else
+      copy = new bin_data_model<T>(*data);
+    std::fill(copy->interval_hits.begin(), copy->interval_hits.end(), 0);
+    return copy;
+  }
+
+  /*!
    *  \brief Create a dynamic copy of this coverpoint with matching bin types
    */
   cvp_base* create_instance(cvg_base* cvg_inst)
@@ -164,32 +180,27 @@ private:
     cvp->cvp_data->option = this->option();
     cvp->cvp_data->sample_expression_str = this->get_sample_expression_str();
     cvp->cvp_data->sample_condition_str = this->get_sample_condition_str();
+    // the data of a transition bin is copied as such, with its sequences
     for(auto& bin_it : this->bins)
     {
-      auto new_bin_data = new bin_data_model<T>;
+      auto new_bin_data = copy_bin_data(bin_it.bin_data);
       cvp->bins.push_back(bin_it);
       cvp->bins.back().bin_data = new_bin_data;
       cvp->cvp_data->bins_data.push_back(new_bin_data);
-      *new_bin_data = *(bin_it.bin_data);
-      std::fill(new_bin_data->interval_hits.begin(),new_bin_data->interval_hits.end(),0);
     }
     for(auto& bin_it : this->illegal_bins)
     {
-      auto new_bin_data = new bin_data_model<T>;
+      auto new_bin_data = copy_bin_data(bin_it.bin_data);
       cvp->illegal_bins.push_back(bin_it);
       cvp->illegal_bins.back().bin_data = new_bin_data;
-      *new_bin_data = *(bin_it.bin_data);
       cvp->cvp_data->illegal_bins_data.push_back(new_bin_data);
-      std::fill(new_bin_data->interval_hits.begin(),new_bin_data->interval_hits.end(),0);
     }
     for(auto& bin_it : this->ignore_bins)
     {
-      auto new_bin_data = new bin_data_model<T>;
+      auto new_bin_data = copy_bin_data(bin_it.bin_data);
       cvp->ignore_bins.push_back(bin_it);
       cvp->ignore_bins.back().bin_data = new_bin_data;
-      *new_bin_data = *(bin_it.bin_data);
       cvp->cvp_data->ignore_bins_data.push_back(new_bin_data);
-      std::fill(new_bin_data->interval_hits.begin(),new_bin_data->interval_hits.end(),0);
     }
 
     for(auto& bin_it : this->default_bins)
@@ -210,6 +221,12 @@ private:
     cvp->regular_interval_map = this->regular_interval_map;
     cvp->illegal_interval_map = this->illegal_interval_map;
     cvp->ignore_interval_map = this->ignore_interval_map;
+
+    // the instance has its own sample history, which starts empty
+    cvp->trans_bins = this->trans_bins;
+    cvp->trans_illegal_bins = this->trans_illegal_bins;
+    cvp->trans_ignore_bins = this->trans_ignore_bins;
+    cvp->trans_depth = this->trans_depth;
     return cvp;
   }
 
@@ -283,6 +300,18 @@ private:
 
   /*! Number of the last sampled values which are not ignored values */
   size_t trans_clean = 0;
+
+  /*! Number of samples given to the transition bins */
+  uint64_t trans_samples = 0;
+
+  /*! Checks if the coverpoint has a default sequence bin */
+  bool has_default_sequence()
+  {
+    for (auto &bin_it : default_bins)
+      if (bin_it.default_data()->sequence)
+        return true;
+    return false;
+  }
 
   /*! Sampling switch */
   bool collect = true;
@@ -397,31 +426,29 @@ private:
    */
   interval_map_iterator_t add_range_map(interval_map_iterator_t hint_it,interval_map_t& interval_map,bin_range_t bin_range_key,fc4sc::interval_t<T> range)
   {
-    // hint_it is end() when the range is after all the intervals: nothing
-    // is to be read from it, and the loop below appends the range
-    if(hint_it != interval_map.end() && range.second < hint_it->first.first) {
-      std::vector<bin_range_t> bin_range_vec{bin_range_key};
-      return std::next( interval_map.insert(hint_it,{range, bin_range_vec }) );
-    }
-    for(auto map_it = hint_it; map_it != interval_map.end(); map_it++)
+    // slice_intervals_map() has cut the intervals of the map at the ends of
+    // the range, so each interval of the map is either inside the range or
+    // outside it. The bin is added to the intervals inside the range, and
+    // the values of the range between them get intervals of their own.
+    auto map_it = hint_it;
+    while(map_it != interval_map.end() && map_it->first.second < range.first)
+      ++map_it;
+    // lowest value of the range not yet in the map
+    T next = range.first;
+    while(map_it != interval_map.end() && map_it->first.first <= range.second)
     {
-      auto it = map_it->first;
-      if(range.first > range.second) {
-        return map_it;
-      }
-      if(range.first <= it.first && range.second >= it.second) { 
-	map_it->second.push_back(bin_range_key);
-      }
-      if(range.first < it.first) {
+      if(next < map_it->first.first) {
         std::vector<bin_range_t> bin_range_vec{bin_range_key};
-        map_it = std::next(interval_map.insert(map_it, {fc4sc::interval<T>(range.first,it.first-1), bin_range_vec } ));
+        interval_map.insert(map_it, {fc4sc::interval<T>(next,map_it->first.first-1), bin_range_vec } );
       }
-      if(it.second + 1 > range.first)
-        range.first = it.second + 1;
+      map_it->second.push_back(bin_range_key);
+      if(map_it->first.second == range.second)
+        return std::next(map_it);
+      next = map_it->first.second + 1;
+      ++map_it;
     }
     std::vector<bin_range_t> bin_range_vec{bin_range_key};
-    interval_map.insert(interval_map.end(), {range, bin_range_vec } );
-    return interval_map.end();
+    return std::next(interval_map.insert(map_it, {fc4sc::interval<T>(next,range.second), bin_range_vec } ));
   }
 
   /*!
@@ -462,20 +489,47 @@ private:
    */
   void sample_transitions(const T &cvp_val, bool ignored)
   {
-    if (trans_depth == 0) return;
+    if (trans_depth == 0 && !has_default_sequence()) return;
 
     trans_history.push_back(cvp_val);
     if (trans_history.size() > trans_depth)
       trans_history.pop_front();
     trans_clean = ignored ? 0 : std::min(trans_clean + 1, trans_depth);
+    trans_samples++;
+
+    // the transitions with goto or nonconsecutive repetitions match each
+    // sample, and no transition goes on past an ignored value. The matches
+    // of the ignored ones are not matches of the others.
+    std::vector<const trans_pattern<T>*> ignored_patterns;
+    for (auto index : this->trans_ignore_bins)
+      for (auto &pattern : static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data)->patterns)
+        ignored_patterns.push_back(&pattern);
+    const std::vector<const trans_pattern<T>*> no_patterns;
+    auto step_patterns = [&](bin_data_model<T>* bin_data, const std::vector<const trans_pattern<T>*>& exclusions) {
+      auto data = static_cast<transition_bin_data_model<T>*>(bin_data);
+      if (data->patterns.empty()) return;
+      if (ignored)
+        data->reset_patterns();
+      else
+        data->step_patterns(cvp_val, trans_samples, exclusions, trans_depth);
+    };
+    for (auto index : this->trans_ignore_bins)
+      step_patterns(this->ignore_bins[index].bin_data, no_patterns);
+    for (auto index : this->trans_illegal_bins)
+      step_patterns(this->illegal_bins[index].bin_data, ignored_patterns);
+    for (auto index : this->trans_bins)
+      step_patterns(this->bins[index].bin_data, ignored_patterns);
     if (ignored) return;
 
-    // the lengths of the last values which are an ignored sequence
+    // the lengths of the last values which are an ignored sequence, up to
+    // the longest value sequence
     std::vector<size_t> ignored_lengths;
+    bool ignored_hit = false;
     for (auto index : this->trans_ignore_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->ignore_bins[index].bin_data);
-      data->sample(trans_history, trans_clean, nullptr, &ignored_lengths);
+      if (data->sample(trans_history, trans_clean, nullptr, &ignored_lengths) >= 0)
+        ignored_hit = true;
     }
 
     for (auto index : this->trans_illegal_bins)
@@ -483,16 +537,14 @@ private:
       auto data = static_cast<transition_bin_data_model<T>*>(this->illegal_bins[index].bin_data);
       int seq = data->sample(trans_history, trans_clean, &ignored_lengths);
       if (seq >= 0) {
-        std::stringstream ss;
-        for (size_t i = 0; i < data->sequences[seq].size(); ++i)
-          ss << ((i == 0) ? "" : " => ") << data->sequences[seq][i];
         illegal_bin_sample_exception e;
-        e.update_bin_info(data->name, ss.str());
+        e.update_bin_info(data->name, data->sequence_text(seq));
         e.update_cvp_info(this->cvp_data->name);
         throw e;
       }
     }
 
+    bool trans_hit = ignored_hit;
     for (auto index : this->trans_bins)
     {
       auto data = static_cast<transition_bin_data_model<T>*>(this->bins[index].bin_data);
@@ -500,8 +552,15 @@ private:
         this->last_bin_index_hit = index;
         this->last_sample_success = true;
         this->last_bins_hit.push_back(index);
+        trans_hit = true;
       }
     }
+
+    // the default sequence bins count the samples which end no transition
+    if (!trans_hit)
+      for (auto &bin_it : this->default_bins)
+        if (bin_it.default_data()->sequence)
+          bin_it.bin_data->interval_hits[0]++;
   }
 
   /*!
@@ -598,12 +657,10 @@ private:
   template <typename... Args>
   coverpoint(bin<T> n, Args... args) : coverpoint(args...)
   {
-    if (!n.is_empty())
-    {
-      std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
-      //bins.push_back(n);
-      n.add_to_cvp(*this);
-    }
+    // an empty bin is not added, with a warning, by add_to_cvp()
+    std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
+    //bins.push_back(n);
+    n.add_to_cvp(*this);
   }
 
   /*!
@@ -630,12 +687,10 @@ private:
   template <typename... Args>
   coverpoint(illegal_bin<T> n, Args... args) : coverpoint(args...)
   {
-    if (!n.is_empty())
-    {
-      std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
-      //illegal_bins.push_back(n);
-      n.add_to_cvp(*this);
-    }
+    // an empty bin is not added, with a warning, by add_to_cvp()
+    std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
+    //illegal_bins.push_back(n);
+    n.add_to_cvp(*this);
   }
 
   /*!
@@ -653,12 +708,10 @@ private:
   template <typename... Args>
   coverpoint(ignore_bin<T> n, Args... args) : coverpoint(args...)
   {
-    if (!n.is_empty())
-    {
-      std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
-      //ignore_bins.push_back(n);
-      n.add_to_cvp(*this);
-    }
+    // an empty bin is not added, with a warning, by add_to_cvp()
+    std::reverse(n.bin_data->intervals.begin(), n.bin_data->intervals.end());
+    //ignore_bins.push_back(n);
+    n.add_to_cvp(*this);
   }
 
   /*!
@@ -806,7 +859,9 @@ public:
   }
 
   /*!
-   *  \brief Computes coverage for this instance
+   *  \brief Computes coverage for this instance. With the strict_sv_options
+   *  and merge_instances type options, it is the type coverage unless the
+   *  get_inst_coverage option of the covergroup instance is set.
    *  \returns Coverage value as a double between 0 and 100
    */
   double get_inst_coverage() const 
@@ -815,6 +870,9 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+
+    if (inst_coverage_is_type_coverage(cvp_data->parent_cvg))
+      return this->get_coverage();
 
     if (bins.empty()) // no bins defined
       return (cvp_data->option.weight == 0) ? 100 : 0;
@@ -829,7 +887,8 @@ public:
   }
 
   /*!
-   *  \brief Computes coverage for this instance
+   *  \brief Computes coverage for this instance, or the type coverage as
+   *  get_inst_coverage()
    *  \param covered Number of covered bins
    *  \param total Total number of bins in this coverpoint
    *  \returns Coverage value as a double between 0 and 100
@@ -840,6 +899,9 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+
+    if (inst_coverage_is_type_coverage(cvp_data->parent_cvg))
+      return this->get_coverage(covered, total);
 
     double res = 0;
     covered = 0;
@@ -1167,6 +1229,51 @@ public:
   void create_bin_array(const std::string &name, const std::vector<ret_type>& intvs)
   {
     bin_array<ret_type>(name,intvs).add_to_cvp(*cvp_fact);
+  }
+
+  /*!
+   *  \brief Creates a transition bin, see \link fc4sc::transition_bin \endlink
+   *  \param bin_name Name of the bin
+   *  \param args Transitions of the bin, see \link fc4sc::trans \endlink
+   *
+   *    The SystemVerilog "bins b = (1 => 2), (3 => 4);" is written
+   *  create_transition_bin("b", trans<int>(1, 2), trans<int>(3, 4)). Each
+   *  instance of the covergroup has its own history of sampled values.
+   */
+  template<typename ... Args>
+  void create_transition_bin(const std::string &bin_name, Args... args)
+  {
+    transition_bin<ret_type>(bin_name,args...).add_to_cvp(*cvp_fact);
+  }
+
+  /*!
+   *  \brief Creates a transition bin array, with a bin for each value
+   *  sequence, see \link fc4sc::transition_bin_array \endlink
+   */
+  template<typename ... Args>
+  void create_transition_bin_array(const std::string &bin_name, Args... args)
+  {
+    transition_bin_array<ret_type>(bin_name,args...).add_to_cvp(*cvp_fact);
+  }
+
+  /*!
+   *  \brief Creates an illegal transition bin, see
+   *  \link fc4sc::illegal_transition_bin \endlink
+   */
+  template<typename ... Args>
+  void create_illegal_transition_bin(const std::string &bin_name, Args... args)
+  {
+    illegal_transition_bin<ret_type>(bin_name,args...).add_to_cvp(*cvp_fact);
+  }
+
+  /*!
+   *  \brief Creates an ignore transition bin, see
+   *  \link fc4sc::ignore_transition_bin \endlink
+   */
+  template<typename ... Args>
+  void create_ignore_transition_bin(const std::string &bin_name, Args... args)
+  {
+    ignore_transition_bin<ret_type>(bin_name,args...).add_to_cvp(*cvp_fact);
   }
 
 };
