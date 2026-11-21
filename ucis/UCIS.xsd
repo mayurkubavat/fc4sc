@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <!--
 Copyright 2012 Accellera Systems Initiative, Inc.
 Copyright 2020 NVIDIA Corporation
@@ -14,7 +15,6 @@ Copyright 2020 NVIDIA Corporation
    See the License for the specific language governing permissions and
    limitations under the License.
 -->
-<?xml version="1.0" encoding="utf-8"?>
 <xsd:schema xmlns="UCIS" targetNamespace="UCIS"
 xmlns:xsd="http://www.w3.org/2001/XMLSchema"
   elementFormDefault="qualified" attributeFormDefault="unqualified">

@@ -25,8 +25,10 @@
 #ifndef UCIS_PRINTER_HPP
 #define UCIS_PRINTER_HPP
 
+#include <map>
 #include <memory>
 #include <sstream>
+#include <string>
 
 #include "fc4sc_base.hpp"
 #include "fc4sc_coverage_db.hpp"
@@ -40,12 +42,27 @@ class xml_printer : public fc4sc::covVisitorBase {
   /*! key generation for UCIS XML */
   int gkey = 1;
 
+  /*! number of coverpointBin elements written for the active coverpoint */
+  size_t coverpoint_bins_written_ = 0;
+
   /*! output stream for xml file */
   std::ostream& stream;
 
+  /*! optional physical file path associated with the output stream */
+  std::string physical_name_;
+
+  static bool has_coverpoints(const fc4sc::cvg_base_data_model& cvg)
+  {
+    for (auto cvp : cvg.cvps)
+      if (dynamic_cast<const fc4sc::coverpoint_base_data_model*>(cvp) != nullptr)
+        return true;
+    return false;
+  }
+
 public:
 
-  xml_printer(std::ostream& out_stream) : stream(out_stream) {}
+  xml_printer(std::ostream& out_stream, const std::string& physical_name = "")
+      : stream(out_stream), physical_name_(physical_name) {}
 
   /*!
    * \brief gets another unique key for UCIS XML generation
@@ -90,11 +107,16 @@ public:
            << "\"";
     stream << ">\n";
 
-    for (auto &fname_it : fc4sc::global::get_file_id_to_name_table(cntxt))
+    const auto& raw_table = fc4sc::global::get_file_id_to_name_table(cntxt);
+    std::map<unsigned int, std::string> sorted_files(raw_table.begin(), raw_table.end());
+    for (const auto &fname_it : sorted_files)
     {
+      const std::string& fname = fname_it.second.empty()
+          ? std::string("unknown")
+          : fname_it.second;
       stream << "<sourceFiles ";
       stream << " fileName=\""
-	     << escape_xml_chars(fname_it.second)
+	     << escape_xml_chars(fname)
 	     << "\"";
       stream << " id=\""
              << fname_it.first
@@ -102,14 +124,18 @@ public:
       stream << "/>\n";
     }
 
-    //TODO: Needed information but not filled
+    const std::string& ctx_db_name = fc4sc::global::get_coverage_db_name(cntxt);
+    const std::string phys_name = !physical_name_.empty()
+        ? physical_name_
+        : (!ctx_db_name.empty() ? ctx_db_name : std::string("ucis_db.xml"));
+
     stream << "<historyNodes ";
     stream << "historyNodeId=\"" << 200 << "\" \n";
     stream << "logicalName=\""
-           << "string"
+           << "default"
            << "\" \n";
     stream << "physicalName=\""
-           << "string"
+           << escape_xml_chars(phys_name)
            << "\" \n";
     /*
     stream << "kind=\""
@@ -164,19 +190,19 @@ public:
            << "\" \n";
     */
     stream << "toolCategory=\""
-           << "string"
+           << "UCIS:Sim"
            << "\" \n";
     stream << "ucisVersion=\""
            << "1.0"
            << "\" \n";
     stream << "vendorId=\""
-           << "string"
+           << "Accellera"
            << "\" \n";
     stream << "vendorTool=\""
-           << "string"
+           << "FC4SC"
            << "\" \n";
     stream << "vendorToolVersion=\""
-           << "string"
+           << "1.0"
            << "\" \n";
     /*
     stream << "sameTests=\""
@@ -231,7 +257,7 @@ public:
       bool instance = false;
       for (size_t i = 0; i < type_it.second.size(); ++i)
       {
-        if(type_it.second[i]->enable) {
+        if(type_it.second[i]->enable && has_coverpoints(*type_it.second[i])) {
           instance = true;
 	  break;
         }
@@ -246,14 +272,14 @@ public:
         // written as one instance which holds the type coverage, first
         std::vector<fc4sc::cvg_base_data_model*> type_insts;
         for (auto cvg : type_it.second)
-          if (cvg->enable && fc4sc::strict_sv_options(cvg->type_data) && !cvg->option.per_instance)
+          if (cvg->enable && has_coverpoints(*cvg) && fc4sc::strict_sv_options(cvg->type_data) && !cvg->option.per_instance)
             type_insts.push_back(cvg);
         if (!type_insts.empty())
           write_type_instance(type_insts);
 
         // Print each instance
         for (auto cvg : type_it.second)
-          if (cvg->enable && std::find(type_insts.begin(), type_insts.end(), cvg) == type_insts.end())
+          if (cvg->enable && has_coverpoints(*cvg) && std::find(type_insts.begin(), type_insts.end(), cvg) == type_insts.end())
             write_cg_instance(*cvg);
 
         stream << "</covergroupCoverage>\n";
@@ -427,9 +453,13 @@ public:
            << " inlineCount=\"1\"/>\n";
     stream << "</cgId>\n";
           
-    // Print coverpoints
+    // UCIS CGINSTANCE requires all <coverpoint> elements before any <cross>.
     for (auto cvp : base.cvps)
-      cvp->accept_visitor(*this);
+      if (dynamic_cast<fc4sc::coverpoint_base_data_model*>(cvp) != nullptr)
+        cvp->accept_visitor(*this);
+    for (auto cvp : base.cvps)
+      if (dynamic_cast<fc4sc::cross_base_data_model*>(cvp) != nullptr)
+        cvp->accept_visitor(*this);
 
 
     stream << "\n";
@@ -456,6 +486,7 @@ public:
     stream << "detect_overlap=\"" << inst.detect_overlap << "\" ";
     stream << "/>\n";
 
+    coverpoint_bins_written_ = 0;
     for (auto bin : base.bins_data)
       bin->accept_visitor(*this);
     for (auto bin : base.illegal_bins_data)
@@ -464,6 +495,14 @@ public:
       bin->accept_visitor(*this);
     for (auto bin : base.default_bins_data)
       bin->accept_visitor(*this);
+
+    // UCIS COVERPOINT requires at least one coverpointBin.
+    if (coverpoint_bins_written_ == 0)
+    {
+      write_ignore_bin("",
+                       std::vector<std::tuple<std::string, std::string, uint64_t>>(
+                           1, std::make_tuple(std::string("0"), std::string("0"), uint64_t(0))));
+    }
 
     stream << "</coverpoint>\n\n";
   }
@@ -675,6 +714,7 @@ public:
   void write_ignore_bin(const std::string& name,
                         const std::vector<std::tuple<std::string, std::string, uint64_t>>& ranges)
   {
+    coverpoint_bins_written_++;
     stream << "<coverpointBin name=\"" << escape_xml_chars(name) << "\" \n";
     stream << "key=\"" << get_unique_key() << "\" \n";
     stream << "type=\"ignore\" >\n";
@@ -699,6 +739,7 @@ public:
       return;
     }
 
+    coverpoint_bins_written_++;
     stream << "<coverpointBin name=\"" << escape_xml_chars(base.get_name()) << "\" \n";
  
     stream << "key=\"" << get_unique_key() << "\" \n";
@@ -723,7 +764,9 @@ public:
            << "\" "
            << ">\n";
 
-    auto bin_intervals = base.get_intervals_to_int();
+    // the values in full, as the schema type of from and to, xsd:integer,
+    // has no limit
+    auto bin_intervals = base.get_intervals_decimal();
     auto interval_hits = base.get_interval_hits();
 
     // Print each range. Coverpoint writes the header (name etc.)
@@ -742,14 +785,14 @@ public:
     }
 
     // Print each sequence of a transition bin
-    auto bin_sequences = base.get_sequences_to_int();
+    auto bin_sequences = base.get_sequences_decimal();
     for (size_t i = 0; i < bin_sequences.size(); ++i)
     {
       stream << "<sequence>\n";
       stream << "<contents "
              << "coverageCount=\"" << interval_hits[i] << "\">";
       stream << "</contents>\n";
-      for (auto value : bin_sequences[i])
+      for (auto &value : bin_sequences[i])
         stream << "<seqValue>" << value << "</seqValue>\n";
       stream << "</sequence>\n\n";
     }
@@ -781,7 +824,14 @@ public:
       std::cerr << "COVERAGE DB WAS NOT BE SAVED!" << std::endl;
       return;
     }
-    coverage_save(file, cntxt, how);
+    xml_printer printer(file, file_name);
+    switch(how) {
+      case fc4sc_format::ucis_xml:
+        printer.print_data_xml(cntxt);
+        break;
+      default :
+	break;
+    }
   }
 
   /*!
