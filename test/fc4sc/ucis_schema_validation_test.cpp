@@ -200,3 +200,44 @@ TEST(ucis_schema_validation, empty_coverpoints_and_covergroups_validate_and_roun
   EXPECT_NE(def_sec.find("name=\"others\""), std::string::npos);
   EXPECT_EQ(def_sec.find("name=\"\""), std::string::npos);
 }
+
+TEST(ucis_schema_validation, history_node_and_source_file_metadata) {
+  const std::string meta_xml = "ucis_schema_history_meta.xml";
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    empty_and_unhit_default_cvg unnamed_src("cvg_unnamed_src", "", 1, cntxt);
+    unnamed_src.x = 2;
+    unnamed_src.sample();
+    xml_printer::coverage_save(meta_xml, cntxt);
+  }
+  fc4sc::global::delete_context(cntxt);
+
+  expect_valid_ucis_schema(meta_xml);
+  const std::string xml = read_file_text(meta_xml);
+  auto root = fc4sc::ucis_db::xml_parser(xml, meta_xml).parse();
+
+  ASSERT_EQ(root->elements("historyNodes").size(), 1u);
+  const auto* hist = root->elements("historyNodes")[0];
+  EXPECT_EQ(hist->get("logicalName"), "default");
+  EXPECT_EQ(hist->get("physicalName"), meta_xml);
+  EXPECT_EQ(hist->get("toolCategory"), "UCIS:Sim");
+  EXPECT_EQ(hist->get("ucisVersion"), "1.0");
+  EXPECT_EQ(hist->get("vendorId"), "Accellera");
+  EXPECT_EQ(hist->get("vendorTool"), "FC4SC");
+  EXPECT_EQ(hist->get("vendorToolVersion"), "1.0");
+
+  const auto src_files = root->elements("sourceFiles");
+  ASSERT_FALSE(src_files.empty());
+  for (size_t i = 0; i < src_files.size(); ++i) {
+    EXPECT_FALSE(src_files[i]->get("fileName").empty());
+    if (i > 0) {
+      EXPECT_LT(std::stoul(src_files[i - 1]->get("id")),
+                std::stoul(src_files[i]->get("id")));
+    }
+  }
+  bool saw_unknown = false;
+  for (auto* sf : src_files) {
+    if (sf->get("fileName") == "unknown") saw_unknown = true;
+  }
+  EXPECT_TRUE(saw_unknown);
+}

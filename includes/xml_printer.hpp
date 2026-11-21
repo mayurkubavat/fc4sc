@@ -25,8 +25,10 @@
 #ifndef UCIS_PRINTER_HPP
 #define UCIS_PRINTER_HPP
 
+#include <map>
 #include <memory>
 #include <sstream>
+#include <string>
 
 #include "fc4sc_base.hpp"
 #include "fc4sc_coverage_db.hpp"
@@ -46,6 +48,9 @@ class xml_printer : public fc4sc::covVisitorBase {
   /*! output stream for xml file */
   std::ostream& stream;
 
+  /*! optional physical file path associated with the output stream */
+  std::string physical_name_;
+
   static bool has_coverpoints(const fc4sc::cvg_base_data_model& cvg)
   {
     for (auto cvp : cvg.cvps)
@@ -56,7 +61,8 @@ class xml_printer : public fc4sc::covVisitorBase {
 
 public:
 
-  xml_printer(std::ostream& out_stream) : stream(out_stream) {}
+  xml_printer(std::ostream& out_stream, const std::string& physical_name = "")
+      : stream(out_stream), physical_name_(physical_name) {}
 
   /*!
    * \brief gets another unique key for UCIS XML generation
@@ -101,11 +107,16 @@ public:
            << "\"";
     stream << ">\n";
 
-    for (auto &fname_it : fc4sc::global::get_file_id_to_name_table(cntxt))
+    const auto& raw_table = fc4sc::global::get_file_id_to_name_table(cntxt);
+    std::map<unsigned int, std::string> sorted_files(raw_table.begin(), raw_table.end());
+    for (const auto &fname_it : sorted_files)
     {
+      const std::string& fname = fname_it.second.empty()
+          ? std::string("unknown")
+          : fname_it.second;
       stream << "<sourceFiles ";
       stream << " fileName=\""
-	     << escape_xml_chars(fname_it.second)
+	     << escape_xml_chars(fname)
 	     << "\"";
       stream << " id=\""
              << fname_it.first
@@ -113,14 +124,18 @@ public:
       stream << "/>\n";
     }
 
-    //TODO: Needed information but not filled
+    const std::string& ctx_db_name = fc4sc::global::get_coverage_db_name(cntxt);
+    const std::string phys_name = !physical_name_.empty()
+        ? physical_name_
+        : (!ctx_db_name.empty() ? ctx_db_name : std::string("ucis_db.xml"));
+
     stream << "<historyNodes ";
     stream << "historyNodeId=\"" << 200 << "\" \n";
     stream << "logicalName=\""
-           << "string"
+           << "default"
            << "\" \n";
     stream << "physicalName=\""
-           << "string"
+           << escape_xml_chars(phys_name)
            << "\" \n";
     /*
     stream << "kind=\""
@@ -175,19 +190,19 @@ public:
            << "\" \n";
     */
     stream << "toolCategory=\""
-           << "string"
+           << "UCIS:Sim"
            << "\" \n";
     stream << "ucisVersion=\""
            << "1.0"
            << "\" \n";
     stream << "vendorId=\""
-           << "string"
+           << "Accellera"
            << "\" \n";
     stream << "vendorTool=\""
-           << "string"
+           << "FC4SC"
            << "\" \n";
     stream << "vendorToolVersion=\""
-           << "string"
+           << "1.0"
            << "\" \n";
     /*
     stream << "sameTests=\""
@@ -809,7 +824,14 @@ public:
       std::cerr << "COVERAGE DB WAS NOT BE SAVED!" << std::endl;
       return;
     }
-    coverage_save(file, cntxt, how);
+    xml_printer printer(file, file_name);
+    switch(how) {
+      case fc4sc_format::ucis_xml:
+        printer.print_data_xml(cntxt);
+        break;
+      default :
+	break;
+    }
   }
 
   /*!
