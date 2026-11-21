@@ -92,6 +92,7 @@ public:
 
   void accept_visitor(covVisitorBase& visitor)
   {
+    sync_options_from_parent();
     visitor.visit(*this);
   }
 
@@ -127,6 +128,7 @@ class cross : public cross_base
     cross<Args...>* crs = new cross<Args...>;
     crs->total_coverpoints = this->total_coverpoints;
     crs->crs_data->name = this->crs_data->name;
+    crs->crs_data->option = this->option();
     for (auto cvp : this->cvps_vec)
     {
       crs->cvps_vec.push_back(&(cvg_inst->get_coverpoint(cvp->name())));
@@ -319,47 +321,6 @@ class cross : public cross_base
   }
 
   /*!
-   *  \brief Helper function to check if a sampled value is in a cross
-   *  \tparam k Index of the currently checked element
-   *  \tparam Head Type of current processed value
-   *  \tparam Tail Rest of sampled values
-   *  \param found Storage of hit bins for each coverpoint
-   *  \param h Current sample value checked
-   *  \param t Rest of sample values
-   *  \returns True if each value is in its corresponding coverpoint
-   */
-  template <size_t k, typename Head, typename... Tail>
-  bool check(std::vector<std::vector<size_t>> &found, Head h, Tail... t)
-  {
-
-    // See if the current value is in its coverpoint, and where
-    std::vector<size_t> bin_indexes = (static_cast<coverpoint<Head> *>(cvps_vec[sizeof...(Args) - k]))->get_bin_index(h);
-
-    // If atleast one bin has it
-    bool found_in_cvp = bin_indexes.size() > 0;
-
-    if (!found_in_cvp)
-    {
-      return false;
-    }
-
-    // Store bins for this coverpoint
-    found.push_back(bin_indexes);
-
-    // Recurse
-    return (k == 1) ? (found_in_cvp) : (check<k - 1>(found, t...) && (found_in_cvp));
-  }
-
-  /*!
-   * \brief End of recursion
-   */
-  template <size_t k>
-  bool check(std::vector<std::vector<size_t>> &found) {
-    (void)found; // safe warning suppression
-    return true;
-  }
-
-  /*!
    *  \brief Private constructor used by dynamic_covergroups
    *  \param cross name
    *  \param args Coverpoints to be crossed
@@ -436,6 +397,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
 
+    crs_data->sync_options_from_parent();
     if (!this->collect) return;
 
     // the bins hit by the sample, for each coverpoint
@@ -485,6 +447,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
 
+    crs_data->sync_options_from_parent();
     if (inst_coverage_is_type_coverage(crs_data->parent_cvg))
       return this->get_coverage();
 
@@ -513,6 +476,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
 
+    crs_data->sync_options_from_parent();
     if (inst_coverage_is_type_coverage(crs_data->parent_cvg))
       return this->get_coverage(covered, total);
 
@@ -602,6 +566,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
 
+    crs_data->sync_options_from_parent();
     return crs_data->option;
   }
 

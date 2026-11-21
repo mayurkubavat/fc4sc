@@ -453,6 +453,7 @@ public:
 
   void visit(cvg_base_data_model& base)
   {
+    base.sync_options();
     if (!base.enable) return;
     for (auto &cvp : base.cvps)
       cvp->accept_visitor(*this);
@@ -460,6 +461,7 @@ public:
 
   void visit(coverpoint_base_data_model& base)
   {
+    base.sync_options_from_parent();
     bool first = (cvps.count(base.name) == 0);
     merged_cvp& merged = get_merged(base.name, false);
     if (first)
@@ -477,6 +479,7 @@ public:
 
   void visit(cross_base_data_model& base)
   {
+    base.sync_options_from_parent();
     bool first = (cvps.count(base.name) == 0);
     merged_cvp& merged = get_merged(base.name, true);
     if (first) {
@@ -628,6 +631,7 @@ public:
 
   void visit(cvg_base_data_model& base)
   {
+    base.sync_options();
     cvg_weight = base.option.weight;
     if(base.enable) {
       cvg_res = 0;
@@ -654,6 +658,7 @@ public:
 
   void visit(coverpoint_base_data_model& base)
   {
+    base.sync_options_from_parent();
     cvp_weight = base.option.weight;
     this->bin_total += base.bins_data.size();
     if (base.bins_data.empty()) {
@@ -676,6 +681,7 @@ public:
 
   void visit(cross_base_data_model& base)
   {
+    base.sync_options_from_parent();
     cvp_weight = base.option.weight;
     
     int covered = 0;

@@ -182,6 +182,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    cvg_data->sync_options();
     if(this->is_enabled()) {
       for (auto& cvp : this->cvps) {
         try {
@@ -234,6 +235,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    cvg_data->sync_options();
     if(this->is_enabled() && inst_coverage_is_type_coverage(cvg_data))
       return fc4sc::global::get_coverage(cvg_data->type_data->scp_type_name, cvg_data->type_data->type_name, coverage_context());
     if(this->is_enabled()) {
@@ -271,6 +273,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    cvg_data->sync_options();
     if(this->is_enabled() && inst_coverage_is_type_coverage(cvg_data))
       return fc4sc::global::get_coverage(cvg_data->type_data->scp_type_name, cvg_data->type_data->type_name,
                                          bins_covered, total, coverage_context());

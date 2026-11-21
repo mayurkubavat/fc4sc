@@ -914,6 +914,33 @@ public:
 };
 
 
+template <typename T>
+inline T add_offset_impl(T lo, uint64_t offset, std::false_type)
+{
+  return static_cast<T>(static_cast<uint64_t>(lo) + offset);
+}
+
+template <typename T>
+inline T add_offset_impl(T lo, uint64_t offset, std::true_type)
+{
+  const int64_t lo64 = static_cast<int64_t>(lo);
+  if (lo64 >= 0) {
+    return static_cast<T>(static_cast<int64_t>(static_cast<uint64_t>(lo64) + offset));
+  }
+  const uint64_t neg_mag = static_cast<uint64_t>(-(lo64 + 1)) + 1ULL;
+  if (offset >= neg_mag) {
+    return static_cast<T>(static_cast<int64_t>(offset - neg_mag));
+  }
+  const uint64_t rem = neg_mag - offset;
+  return static_cast<T>(-static_cast<int64_t>(rem - 1ULL) - 1);
+}
+
+template <typename T>
+inline T add_offset(T lo, uint64_t offset)
+{
+  return add_offset_impl(lo, offset, std::is_signed<T>());
+}
+
 template <class T>
 class bin_array final : public bin<T>
 {
@@ -1074,30 +1101,36 @@ public:
     else {
       // bin array was defined by using an interval which needs to be split into
       // multiple pieces. The interval is found in the this->bin_data->intervals[0]
+      const T lo = this->bin_data->intervals[0].first;
+      const T hi = this->bin_data->intervals[0].second;
+      const uint64_t dist = static_cast<uint64_t>(hi) - static_cast<uint64_t>(lo);
 
-      uint64_t interval_length = (this->bin_data->intervals[0].second - this->bin_data->intervals[0].first) + 1;
-
-      if (this->count > interval_length) {
+      if (this->count - 1 > dist) {
         // This bin array interval cannot be split into pieces. Add a single
         // bin containing the whole interval to the coverpoint. We can simply
         // use this object since it already matches the bin that we need!
-        //cvp.bins.push_back(*this);
-	this->bin<T>::add_to_cvp(cvp);
+        this->bin<T>::add_to_cvp(cvp);
+      }
+      else if (this->count == 1) {
+        bin<T>(this->bin_data->name + "[0]", interval(lo, hi)).add_to_cvp(cvp);
       }
       else {
         std::stringstream ss;
-        // This bin array interval must be split into pieces.
-        T start = this->bin_data->intervals[0].first;
-        T stop = this->bin_data->intervals[0].second;
-        T interval_len = (interval_length + 1) / this->count;
+        // Split [lo, hi] (dist + 1 elements) across count >= 2 bins:
+        // first count - 1 bins get q = floor((dist + 1) / count), last bin gets remainder.
+        const uint64_t k = dist / this->count;
+        const uint64_t m = dist % this->count;
+        const uint64_t q = k + ((m == this->count - 1) ? 1ULL : 0ULL);
 
-        for (size_t i = 0; i < this->count; ++i) {
+        uint64_t offset = 0;
+        for (uint64_t i = 0; i < this->count; ++i) {
           ss << this->bin_data->name << "[" << i << "]";
-          // the last interval, will contain all the extra elements
-          T end = (i == (this->count - 1)) ? stop : start + (interval_len - 1);
-          //cvp.bins.push_back(bin<T>(ss.str(), interval(start, end)));
+          const T start = add_offset(lo, offset);
+          const T end = (i == this->count - 1) ? hi : add_offset(lo, offset + (q - 1));
           bin<T>(ss.str(), interval(start, end)).add_to_cvp(cvp);
-          start = start + interval_len;
+          if (i != this->count - 1) {
+            offset += q;
+          }
           ss.str(std::string()); // clear the stringstream
         }
       }

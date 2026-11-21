@@ -55,13 +55,13 @@ struct cvg_option
   /*! Minimum of hits for each bin */
   unsigned int at_least;
 
-  /*! !UNIPLEMENTED! Max number of generated bins */
+  /*! Max number of generated bins (inherited by coverpoints; automatic bin generation not yet implemented) */
   unsigned int auto_bin_max;
 
-  /*! !UNIPLEMENTED! Issue warning if bins overlap in cvp */
+  /*! Issue warning if bins overlap in child coverpoints */
   bool detect_overlap;
 
-  /*! !UNIPLEMENTED! Number of missing bins in crosses to be printed */
+  /*! Number of missing bins in child crosses to be printed */
   unsigned int cross_num_print_missing;
 
   /*!
@@ -123,7 +123,7 @@ struct cvp_option
   /*! Minimum of hits for each bin */
   unsigned int at_least;
 
-  /*! !UNIPLEMENTED! Max number of generated bins */
+  /*! Max number of generated bins (automatic bin generation not yet implemented) */
   unsigned int auto_bin_max;
 
   /*! Issue a warning for each pair of regular bins of the coverpoint which

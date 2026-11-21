@@ -413,6 +413,7 @@ public:
 
   void visit(fc4sc::cvg_base_data_model& base)
   {
+    base.sync_options();
     auto& inst = base.option;
     stream << "<options ";
     stream << "weight=\"" << inst.weight << "\" ";
@@ -468,6 +469,7 @@ public:
 
   void visit(fc4sc::coverpoint_base_data_model& base)
   {
+    base.sync_options_from_parent();
     stream << "<coverpoint ";
     stream << "name=\"" << escape_xml_chars(base.name) << "\" ";
     stream << "key=\""
@@ -509,6 +511,7 @@ public:
 
   void visit(fc4sc::cross_base_data_model& base)
   {
+    base.sync_options_from_parent();
     stream << "<cross ";
     stream << "name=\"" << escape_xml_chars(base.name) << "\" ";
     stream << "key=\""

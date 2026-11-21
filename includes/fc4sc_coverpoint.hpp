@@ -102,6 +102,7 @@ public:
 
   void accept_visitor(covVisitorBase& visitor)
   {
+    sync_options_from_parent();
     visitor.visit(*this);
   }
 
@@ -573,6 +574,7 @@ private:
 #ifdef FC4SC_DISABLE_SAMPLING
     return;
 #endif
+    cvp_data->sync_options_from_parent();
     // The options are plain fields which are set after the bins are
     // defined, so option.detect_overlap is looked at when sampling: the
     // check is made once, on the first sample after the option is set,
@@ -871,6 +873,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
 
+    cvp_data->sync_options_from_parent();
     if (inst_coverage_is_type_coverage(cvp_data->parent_cvg))
       return this->get_coverage();
 
@@ -900,6 +903,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
 
+    cvp_data->sync_options_from_parent();
     if (inst_coverage_is_type_coverage(cvp_data->parent_cvg))
       return this->get_coverage(covered, total);
 
@@ -1021,6 +1025,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
 
+    cvp_data->sync_options_from_parent();
     return cvp_data->option;
   }
 

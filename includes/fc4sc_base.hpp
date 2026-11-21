@@ -531,6 +531,9 @@ public:
    */
   cvp_type_option& type_option();
 
+  /*! Propagate inherited options from parent covergroup */
+  virtual void sync_options_from_parent() {}
+
   /*! Visitor function for introspection */
   virtual void accept_visitor(covVisitorBase&) = 0;
 
@@ -620,6 +623,17 @@ public:
 
   /*! Coverpoint options */
   cvp_option option;
+
+  /*! Last synced option values from parent covergroup */
+  cvp_option synced_option_;
+
+  /*! Per-field override flags for inherited options */
+  bool at_least_overridden_ = false;
+  bool auto_bin_max_overridden_ = false;
+  bool detect_overlap_overridden_ = false;
+
+  /*! Propagate inherited options from parent covergroup */
+  void sync_options_from_parent() override;
 
   /*! Vector of pointers to regular bin data */
   std::vector<bin_base_data_model*> bins_data;
@@ -812,6 +826,16 @@ public:
   /*! Cross options */
   cross_option option;
 
+  /*! Last synced option values from parent covergroup */
+  cross_option synced_option_;
+
+  /*! Per-field override flags for inherited options */
+  bool at_least_overridden_ = false;
+  bool cross_num_print_missing_overridden_ = false;
+
+  /*! Propagate inherited options from parent covergroup */
+  void sync_options_from_parent() override;
+
   /*! Vector of crossed coverpoints */
   std::vector<cvp_base_data_model*> cross_cvps;
 
@@ -938,11 +962,20 @@ public:
   scp_base_data_model* parent_scp = nullptr;
 
 
+  /*! Propagate inherited options to all child coverpoints and crosses */
+  void sync_options()
+  {
+    for (auto cvp : cvps) {
+      cvp->sync_options_from_parent();
+    }
+  }
+
   /*! Add coverpoint/cross data to the covergroup */
   void add_cvp_data(cvp_base_data_model* cvp_data)
   {
     cvp_data->parent_cvg = this;
     cvps.push_back(cvp_data);
+    cvp_data->sync_options_from_parent();
   }
   
   /*!
@@ -950,6 +983,7 @@ public:
    */
   virtual void accept_visitor(covVisitorBase& visitor)
   {
+    sync_options();
     visitor.visit(*this);
   }
 
@@ -1271,6 +1305,52 @@ inline cvp_type_option& cvp_base_data_model::type_option()
   if (parent_cvg == nullptr || parent_cvg->type_data == nullptr)
     return own_type_option;
   return parent_cvg->type_data->cvp_type_options[name];
+}
+
+inline void coverpoint_base_data_model::sync_options_from_parent()
+{
+  if (option.at_least != synced_option_.at_least)
+    at_least_overridden_ = true;
+  if (option.auto_bin_max != synced_option_.auto_bin_max)
+    auto_bin_max_overridden_ = true;
+  if (option.detect_overlap != synced_option_.detect_overlap)
+    detect_overlap_overridden_ = true;
+
+  if (parent_cvg == nullptr)
+    return;
+
+  if (!at_least_overridden_) {
+    option.at_least = parent_cvg->option.at_least;
+    synced_option_.at_least = option.at_least;
+  }
+  if (!auto_bin_max_overridden_) {
+    option.auto_bin_max = parent_cvg->option.auto_bin_max;
+    synced_option_.auto_bin_max = option.auto_bin_max;
+  }
+  if (!detect_overlap_overridden_) {
+    option.detect_overlap = parent_cvg->option.detect_overlap;
+    synced_option_.detect_overlap = option.detect_overlap;
+  }
+}
+
+inline void cross_base_data_model::sync_options_from_parent()
+{
+  if (option.at_least != synced_option_.at_least)
+    at_least_overridden_ = true;
+  if (option.cross_num_print_missing != synced_option_.cross_num_print_missing)
+    cross_num_print_missing_overridden_ = true;
+
+  if (parent_cvg == nullptr)
+    return;
+
+  if (!at_least_overridden_) {
+    option.at_least = parent_cvg->option.at_least;
+    synced_option_.at_least = option.at_least;
+  }
+  if (!cross_num_print_missing_overridden_) {
+    option.cross_num_print_missing = parent_cvg->option.cross_num_print_missing;
+    synced_option_.cross_num_print_missing = option.cross_num_print_missing;
+  }
 }
 
 /*!
