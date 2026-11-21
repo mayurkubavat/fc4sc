@@ -1108,6 +1108,19 @@ private:
    * sequences of a matching bin which match none of the other are added to
    * the bin, with a warning.
    */
+public:
+  static bool is_empty_placeholder_bin(const xml_node& n)
+  {
+    if (n.name != "coverpointBin" || n.get("type") != "ignore" || !n.get("name").empty())
+      return false;
+    if (!n.elements("sequence").empty())
+      return false;
+    auto ranges = n.elements("range");
+    return ranges.size() == 1 && ranges[0]->get("from") == "0" &&
+           ranges[0]->get("to") == "0" && coverage_count(*ranges[0]) == 0;
+  }
+
+private:
   void merge_coverpoint(xml_node& into, const xml_node& from, const std::string& where = std::string())
   {
     auto bin_key = [](const xml_node& n) { return n.get("type") + "\n" + n.get("name"); };
@@ -1140,6 +1153,15 @@ private:
         warn("sequence " + sequence_key(n));
       });
     });
+
+    if (into.elements("coverpointBin").size() > 1) {
+      into.children.erase(
+          std::remove_if(into.children.begin(), into.children.end(),
+                         [](const std::unique_ptr<xml_node>& c) {
+                           return is_empty_placeholder_bin(*c);
+                         }),
+          into.children.end());
+    }
   }
 };
 
@@ -1346,6 +1368,8 @@ private:
         }
       }
       if (data_bin == nullptr) {
+        if (merger::is_empty_placeholder_bin(*bin))
+          continue;
         missing("bin " + bin_path);
         continue;
       }
