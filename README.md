@@ -20,6 +20,26 @@ The main documentation of FC4SC can be found in the [doc](doc) directory. It con
 
 FC4SC is a header only library. Add an include to the header file `fc4sc.hpp` in your program and add the directory `includes` to you compiler include path.
 
+### Building with CMake
+
+FC4SC provides an optional CMake build, which installs the headers together with a CMake package:
+
+```
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/path/to/install
+cmake --install build
+```
+
+A CMake project can then use the installed library, with `/path/to/install` added to its `CMAKE_PREFIX_PATH`:
+
+```
+find_package(FC4SC REQUIRED)
+target_link_libraries(my_testbench PRIVATE FC4SC::fc4sc)
+```
+
+Alternatively, add the FC4SC sources to a project with `add_subdirectory` and link to the same `FC4SC::fc4sc` target.
+
+The unit tests in `test/fc4sc` are enabled with `-DFC4SC_BUILD_TESTS=ON` and run with `ctest`. They use an installed googletest, or download it when none is found. `-DFC4SC_BUILD_EXAMPLES=ON` builds the `fir` example, which requires SystemC to be found via `CMAKE_PREFIX_PATH`.
+
 ### Release Notes
 
 See the separate [RELEASENOTES](RELEASENOTES) file that provides up-to-date information about this release of FC4SC.
