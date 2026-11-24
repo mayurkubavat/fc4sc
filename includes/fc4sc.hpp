@@ -39,13 +39,7 @@
 #ifndef FC4SC_HPP
 #define FC4SC_HPP
 
-#include <utility> // std::pair
-
-namespace fc4sc {
-  template<typename T>
-  using interval_t = std::pair<T, T>;
-};
-
+#include "fc4sc_type_traits.hpp"
 #include "fc4sc_base.hpp"
 #include "fc4sc_master.hpp"
 #include "fc4sc_intervals.hpp"
@@ -57,15 +51,34 @@ namespace fc4sc {
 #include "fc4sc_covergroup.hpp"
 #include "fc4sc_scope.hpp"
 #include "xml_printer.hpp"
+#include "fc4sc_coverage_db.hpp"
 
 using fc4sc::interval;
 using fc4sc::bin;
 using fc4sc::bin_array;
+using fc4sc::default_bin;
+using fc4sc::default_bin_array;
 using fc4sc::binsof;
 using fc4sc::ignore_bin;
 using fc4sc::illegal_bin;
+using fc4sc::wildcard;
+using fc4sc::wildcard_values;
 using fc4sc::coverpoint;
 using fc4sc::cross;
 using fc4sc::covergroup;
+using fc4sc::trans;
+using fc4sc::transition_bin;
+using fc4sc::transition_bin_array;
+using fc4sc::illegal_transition_bin;
+using fc4sc::ignore_transition_bin;
+using fc4sc::default_sequence_bin;
+using fc4sc::cross_bin;
+using fc4sc::ignore_cross_bin;
+using fc4sc::illegal_cross_bin;
+using fc4sc::fc4sc_type_traits;
+using fc4sc::fc4sc_enum_traits;
+using fc4sc::half_open_interval;
+using fc4sc::tolerance;
+using fc4sc::percent_tolerance;
 
 #endif /* FC4SC_HPP */

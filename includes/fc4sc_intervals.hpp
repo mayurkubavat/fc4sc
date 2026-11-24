@@ -33,25 +33,28 @@ namespace fc4sc {
   template <typename T>
   static std::vector<interval_t<T>> reunion(const std::vector<interval_t<T>>& lhs,
 					    const std::vector<interval_t<T>>& rhs) {
+    typedef fc4sc_type_traits<T> traits;
+    std::vector<interval_t<T>> new_bins;
+    new_bins.reserve(lhs.size() + rhs.size());
+    for (const auto& iv : lhs)
+      new_bins.push_back(traits::validate_interval(iv.first, iv.second));
+    for (const auto& iv : rhs)
+      new_bins.push_back(traits::validate_interval(iv.first, iv.second));
+    if (new_bins.empty())
+      return new_bins;
 
-    std::vector<interval_t<T>> new_bins = lhs;
-    new_bins.insert(new_bins.end() ,rhs.begin(), rhs.end());
-
-    std::sort(new_bins.begin(), new_bins.end(), [](const interval_t<T>& lhs, const interval_t<T>& rhs) {
-      return lhs.first < rhs.first;
-    }); 
+    std::sort(new_bins.begin(), new_bins.end(), [](const interval_t<T>& a, const interval_t<T>& b) {
+      return traits::less(a.first, b.first);
+    });
 
     std::vector<interval_t<T>> result_bins;
     result_bins.push_back(new_bins[0]);
 
-
     for (size_t i = 1; i < new_bins.size(); ++i) {
-
-      if(result_bins.back().second < new_bins[i].first)
-        result_bins.push_back(new_bins[i]); 
-      else 
-        result_bins.back().second = std::max(result_bins.back().second, new_bins[i].second);
-
+      if (traits::less(result_bins.back().second, new_bins[i].first))
+        result_bins.push_back(new_bins[i]);
+      else if (traits::less(result_bins.back().second, new_bins[i].second))
+        result_bins.back().second = new_bins[i].second;
     }
 
     return result_bins;
@@ -60,7 +63,7 @@ namespace fc4sc {
   template <typename T>
   static std::vector<interval_t<T>> intersection(const std::vector<interval_t<T>>& lhs,
 					    const std::vector<interval_t<T>>& rhs) {
-
+    typedef fc4sc_type_traits<T> traits;
     auto disjoint_lhs = reunion(lhs, {});
     auto disjoint_rhs = reunion(rhs, {});
 
@@ -68,24 +71,23 @@ namespace fc4sc {
 
     for (auto &it_lhs: disjoint_lhs) {
       for (auto &it_rhs: disjoint_rhs) {
-        
-        if (it_lhs.second < it_rhs.first)
+        if (traits::less(it_lhs.second, it_rhs.first))
           continue;
 
-        if (it_rhs.second < it_lhs.first)
+        if (traits::less(it_rhs.second, it_lhs.first))
           continue;
 
+        const T lo = traits::less(it_lhs.first, it_rhs.first) ? it_rhs.first : it_lhs.first;
+        const T hi = traits::less(it_rhs.second, it_lhs.second) ? it_rhs.second : it_lhs.second;
+        auto new_intv = interval(lo, hi);
 
-        auto new_intv = interval( max(it_lhs.first, it_rhs.first), min(it_rhs.second, it_lhs.second)   ) ;
- 
-        if (new_intv.first > new_intv.second)
+        if (traits::less(new_intv.second, new_intv.first))
           std::swap(new_intv.first, new_intv.second);
 
         results.push_back(new_intv);
       }
     }
     return results;
-
   }
 
   template <typename T>

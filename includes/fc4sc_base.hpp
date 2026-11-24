@@ -34,6 +34,7 @@
 #ifndef FC4SC_BASE_HPP
 #define FC4SC_BASE_HPP
 
+#include <cstdint>
 #include <map>
 #include <iostream>
 #include <string>
@@ -46,8 +47,11 @@
 #include <unordered_map>
 #include <assert.h>
 #include <memory>
+#include <stdexcept>
+#include <type_traits>
 
 #include "fc4sc_options.hpp"
+#include "fc4sc_type_traits.hpp"
 
 /*
  * Template meta-programming tool used for checking that a parameter
@@ -63,26 +67,31 @@ template<typename forbidden, typename head, typename...tail> struct forbid_type 
     (!std::is_convertible<head, forbidden>::value);
 };
 template<typename forbidden, typename first> struct forbid_type<forbidden, first> :
-  public std::__not_<std::is_convertible<first, forbidden>> {};
+  public std::integral_constant<bool, !std::is_convertible<first, forbidden>::value> {};
 
 /*!
  * \brief Macro to declare constructor for covergroup registration.
  *
  * This macro expands to a constructor declaration for your custom type, which calls a parent constructor
  * to register the new instance, with some additional info useful for displaying the final report.
+ * The default arguments of the constructor are part of this declaration. Default values
+ * for additional constructor arguments (args) have to be given here as well, and not in
+ * the corresponding CG_CONS_DEF.
  */
 #define CG_CONS_DECL(type, args...) \
   using covergroup::sample; \
-  type(std::string inst_name, const char *auto_inst_file_name, int auto_line, fc4sc::global* cntxt, ##args)
+  type(std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, fc4sc::global* cntxt = fc4sc::global::getter(), ##args)
 
 /*!
  * \brief Macro to define constructor for covergroup registration.
  *
  * This macro expands to a constructor definition for your custom type, which calls a parent constructor
  * to register the new instance, with some additional info useful for displaying the final report.
+ * The default arguments of the constructor belong to the declaration (CG_CONS_DECL),
+ * so additional constructor arguments (args) must be given without default values here.
  */
 #define CG_CONS_DEF(type, args...) \
-  type::type(std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, fc4sc::global* cntxt = fc4sc::global::getter(), ##args) : fc4sc::covergroup(#type, __FILE__, __LINE__, inst_name, auto_inst_file_name, auto_line, cntxt)
+  type::type(std::string inst_name, const char *auto_inst_file_name, int auto_line, fc4sc::global* cntxt, ##args) : fc4sc::covergroup(#type, __FILE__, __LINE__, inst_name, auto_inst_file_name, auto_line, cntxt)
 
 /*!
  * \brief Macro to register your covergroup.
@@ -100,10 +109,13 @@ template<typename forbidden, typename first> struct forbid_type<forbidden, first
  * This macro expands to a constructor declaration for your custom type, which calls a parent constructor
  * to register the new instance, with some additional info useful for displaying the final report.
  * Requires that the covergroup must be associated with a scope when instantiated
+ * The default arguments of the constructor are part of this declaration. Default values
+ * for additional constructor arguments (args) have to be given here as well, and not in
+ * the corresponding CG_SCOPED_CONS_DEF.
  */
 #define CG_SCOPED_CONS_DECL(type, scp_type, args...) \
   using covergroup::sample; \
-  type(fc4sc::scp_base& scp, std::string inst_name, const char *auto_inst_file_name, int auto_line, ##args)
+  type(fc4sc::scp_base& scp, std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, ##args)
 
 /*!
  * \brief Macro to define constructor for covergroup registration within a scope.
@@ -111,9 +123,11 @@ template<typename forbidden, typename first> struct forbid_type<forbidden, first
  * This macro expands to a constructor definition for your custom type, which calls a parent constructor
  * to register the new instance, with some additional info useful for displaying the final report.
  * Requires that the covergroup must be associated with a scope when instantiated
+ * The default arguments of the constructor belong to the declaration (CG_SCOPED_CONS_DECL),
+ * so additional constructor arguments (args) must be given without default values here.
  */
 #define CG_SCOPED_CONS_DEF(type, scp_type, args...) \
-  scp_type::type::type(fc4sc::scp_base& scp, std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, ##args) : fc4sc::covergroup(scp, #type, scp_type::scp_type_name(), __FILE__, __LINE__, inst_name, auto_inst_file_name, auto_line)
+  scp_type::type::type(fc4sc::scp_base& scp, std::string inst_name, const char *auto_inst_file_name, int auto_line, ##args) : fc4sc::covergroup(scp, #type, scp_type::scp_type_name(), __FILE__, __LINE__, inst_name, auto_inst_file_name, auto_line)
 
 
 /*!
@@ -169,16 +183,16 @@ template<typename forbidden, typename first> struct forbid_type<forbidden, first
 
 // COVERPOINT macro for 3 arguments (no sample condition)
 #define CVP_3(type, cvp_name, sample_expr) \
-        coverpoint<type> cvp_name = \
-        covergroup::register_cvp<type>(&cvp_name, #cvp_name, \
-        CREATE_WRAP_F(sample_expr, type), #sample_expr, \
+        coverpoint<fc4sc::detail::decay_t<type>> cvp_name = \
+        covergroup::register_cvp<fc4sc::detail::decay_t<type>>(&cvp_name, #cvp_name, \
+        CREATE_WRAP_F(sample_expr, fc4sc::detail::decay_t<type>), #sample_expr, \
         CREATE_WRAP_F(true, bool), std::string("")) =
 
 // COVERPOINT macro for 4 arguments (sample condition included)
 #define CVP_4(type, cvp_name, sample_expr, sample_cond) \
-        coverpoint<type> cvp_name = \
-        covergroup::register_cvp<type>(&cvp_name, #cvp_name, \
-        CREATE_WRAP_F(sample_expr, type), #sample_expr, \
+        coverpoint<fc4sc::detail::decay_t<type>> cvp_name = \
+        covergroup::register_cvp<fc4sc::detail::decay_t<type>>(&cvp_name, #cvp_name, \
+        CREATE_WRAP_F(sample_expr, fc4sc::detail::decay_t<type>), #sample_expr, \
         CREATE_WRAP_F(sample_cond, bool), #sample_cond) =
 
 // global var for type name and instance name of default scopes
@@ -197,6 +211,7 @@ using cvp_metadata_t = std::tuple<void*, std::string, std::string>;
 class covVisitorBase;
 class covergroup;
 class cvg_base;
+class cvp_base;
 class scp_base;
 class cross_base;
 class coverpoint_base;
@@ -231,7 +246,13 @@ typedef enum
 {
   default_,
   illegal_,
-  ignore_
+  ignore_,
+  /*!
+   * A default bin, as the SystemVerilog "bins b = default;": it holds the
+   * values which are in no other bin, and is not counted in the coverage.
+   * default_ is the type of the regular bins.
+   */
+  default_bin_
 } bin_t;
 
 /*!
@@ -274,8 +295,97 @@ public:
   /*! Indicates if the data within this object is valid */
   std::shared_ptr<bool> valid = std::make_shared<bool>(true);
 
-  /*! Get intervals in type int */
+  /*!
+   * Get intervals in type int. The values which do not fit in an int, as
+   * the values of a 64-bit type or the values of an unsigned int above
+   * INT_MAX, are truncated: get_intervals_decimal() has them in full.
+   */
   virtual std::vector<interval_t<int>> get_intervals_to_int() const = 0;
+
+  /*!
+   * Get the value sequences of a transition bin in type int. The hit
+   * counts in get_interval_hits() belong to these sequences, and a bin has
+   * either intervals or sequences. The values are truncated to an int as
+   * in get_intervals_to_int(): get_sequences_decimal() has them in full.
+   */
+  virtual std::vector<std::vector<int>> get_sequences_to_int() const
+  {
+    return std::vector<std::vector<int>>();
+  }
+
+  /*!
+   * Get the intervals with their limits written in decimal, in full: a
+   * value of any integral type, up to 64 bits, signed or unsigned. These
+   * are the values written to the coverage database.
+   */
+  virtual std::vector<interval_t<std::string>> get_intervals_decimal() const
+  {
+    std::vector<interval_t<std::string>> intervals;
+    for (auto &intv : get_intervals_to_int())
+      intervals.push_back(interval_t<std::string>(std::to_string(intv.first), std::to_string(intv.second)));
+    return intervals;
+  }
+
+  /*!
+   * Get the value sequences of a transition bin with their values written
+   * in decimal, in full, as get_intervals_decimal()
+   */
+  virtual std::vector<std::vector<std::string>> get_sequences_decimal() const
+  {
+    std::vector<std::vector<std::string>> sequences;
+    for (auto &seq : get_sequences_to_int())
+    {
+      sequences.push_back(std::vector<std::string>());
+      for (auto value : seq)
+        sequences.back().push_back(std::to_string(value));
+    }
+    return sequences;
+  }
+
+  /*!
+   * For a default bin array which has values but no value hit, a range of
+   * its first value with no hits, written in decimal: the file has a bin
+   * of the array for it, so that the coverpoint has a bin. Empty otherwise.
+   */
+  virtual std::vector<std::tuple<std::string, std::string, uint64_t>> get_unhit_array_range() const
+  {
+    return std::vector<std::tuple<std::string, std::string, uint64_t>>();
+  }
+
+  /*!
+   * Get the value ranges of a default bin with their hit counts, the
+   * values written in decimal, as they may not fit in an int. For a default
+   * bin array, as the SystemVerilog "bins b[] = default;", which has a bin
+   * for each value hit, a range of one value for each value hit. Empty for
+   * other bins.
+   */
+  virtual std::vector<std::tuple<std::string, std::string, uint64_t>> get_default_ranges() const
+  {
+    return std::vector<std::tuple<std::string, std::string, uint64_t>>();
+  }
+
+  /*! Whether this is a default bin array, with a bin for each value hit */
+  virtual bool is_value_array() const
+  {
+    return false;
+  }
+
+  /*!
+   * Adds hits to a value of a default bin array, the value written in
+   * decimal. Returns false if this is not a default bin array, or if the
+   * value is not one of its values.
+   */
+  virtual bool add_value_hits(const std::string& value, uint64_t count)
+  {
+    (void)value;
+    (void)count;
+    return false;
+  }
+
+  virtual std::vector<xml_user_attr> get_user_attrs() const
+  {
+    return std::vector<xml_user_attr>();
+  }
 
   /*! Get name of bin */
   virtual std::string& get_name() = 0;
@@ -309,8 +419,18 @@ public:
    */
   virtual uint64_t get_hitcount() const = 0;
  
-  /*! Get intervals casted as int type */
+  /*! Get intervals casted as int type, the values which do not fit in an
+   *  int truncated */
   virtual std::vector<interval_t<int>> get_intervals_to_int() const = 0;
+
+  /*! Get intervals with their limits written in decimal, in full */
+  virtual std::vector<interval_t<std::string>> get_intervals_decimal() const
+  {
+    std::vector<interval_t<std::string>> intervals;
+    for (auto &intv : get_intervals_to_int())
+      intervals.push_back(interval_t<std::string>(std::to_string(intv.first), std::to_string(intv.second)));
+    return intervals;
+  }
 
   /*! Get reference to bin name */
   virtual std::string& name() = 0;
@@ -405,6 +525,29 @@ public:
   /*! Number of sample misses (no bin hit)*/
   uint64_t misses = 0;
 
+  /*! Data of the covergroup instance this coverpoint or cross is in,
+   *  or nullptr if it is in none */
+  cvg_base_data_model* parent_cvg = nullptr;
+
+  /*! Owning coverpoint/cross wrapper for deferred bin materialization */
+  cvp_base* owner_ = nullptr;
+
+  /*! Re-entrancy guard for ensure_bins / ensure_cross */
+  mutable bool in_ensure_bins_ = false;
+
+  /*! Type options of a coverpoint or cross which is in no covergroup */
+  cvp_type_option own_type_option;
+
+  /*!
+   * \brief Returns the type options of this coverpoint or cross, which
+   * are shared by the coverpoints or crosses with its name in all the
+   * instances of its covergroup type
+   */
+  cvp_type_option& type_option();
+
+  /*! Propagate inherited options from parent covergroup */
+  virtual void sync_options_from_parent() {}
+
   /*! Visitor function for introspection */
   virtual void accept_visitor(covVisitorBase&) = 0;
 
@@ -431,7 +574,24 @@ public:
   size_t last_bin_index_hit = 0;
   bool last_sample_success = false;
 
+  /*!
+   * Indices of all the bins hit by the last sample, in increasing order.
+   * A sample can hit several bins of a coverpoint: bins with overlapping
+   * values, or a value bin and transition bins. A cross counts every
+   * combination of them.
+   */
+  std::vector<size_t> last_bins_hit;
+
   virtual cvp_base* create_instance(cvg_base* cvg_inst) = 0;
+
+  /*! Materialize automatic / distribute_first bins when needed */
+  virtual void ensure_bins() const {}
+
+  /*! Whether bin definitions depend on post-ctor options (auto_bin_max / distribute_first) */
+  virtual bool has_deferred_bins() const { return false; }
+
+  /*! Epoch counter incremented whenever coverpoint bins are rebuilt */
+  virtual uint64_t bins_epoch() const { return 0; }
 
   /*! Instance specific options */
   virtual uint64_t get_weight() = 0;
@@ -444,6 +604,31 @@ public:
 
   /*! Get pointer to data model */
   virtual cvp_base_data_model* get_data() = 0;
+
+  /*!
+   * \brief Returns the type options of this coverpoint or cross, shared by
+   * all the instances of its covergroup type, see \link cvp_type_option
+   * \endlink
+   */
+  cvp_type_option& type_option()
+  {
+    return get_data()->type_option();
+  }
+
+  /*!
+   * \brief Returns the type coverage of this coverpoint or cross: its
+   * coverage across all the instances of the covergroup type it is in
+   * \returns Double between 0 and 100
+   */
+  virtual double get_coverage() const = 0;
+
+  /*!
+   * \brief Returns the type coverage of this coverpoint or cross
+   * \param covered Number of covered bins, summed over the instances
+   * \param total Total number of bins, summed over the instances
+   * \returns Double between 0 and 100
+   */
+  virtual double get_coverage(int &covered, int &total) const = 0;
 
   /*! Destructor */
   virtual ~cvp_base(){}
@@ -462,6 +647,17 @@ public:
   /*! Coverpoint options */
   cvp_option option;
 
+  /*! Last synced option values from parent covergroup */
+  cvp_option synced_option_;
+
+  /*! Per-field override flags for inherited options */
+  bool at_least_overridden_ = false;
+  bool auto_bin_max_overridden_ = false;
+  bool detect_overlap_overridden_ = false;
+
+  /*! Propagate inherited options from parent covergroup */
+  void sync_options_from_parent() override;
+
   /*! Vector of pointers to regular bin data */
   std::vector<bin_base_data_model*> bins_data;
 
@@ -470,6 +666,9 @@ public:
 
   /*! Vector of pointers to ignore bin data */
   std::vector<bin_base_data_model*> ignore_bins_data;
+
+  /*! Vector of pointers to default bin data, see bin_t::default_bin_ */
+  std::vector<bin_base_data_model*> default_bins_data;
 
   /*! Get reference to sample expression string */
   virtual std::string& get_sample_expression_str() = 0;
@@ -487,6 +686,9 @@ public:
       delete bin_it;
     }
     for(auto bin_it : this->ignore_bins_data) {
+      delete bin_it;
+    }
+    for(auto bin_it : this->default_bins_data) {
       delete bin_it;
     }
   }
@@ -518,9 +720,145 @@ public:
   /*! Get vector of ignore bins associated with this coverpoint */
   virtual std::vector<bin_base*> get_ignore_bins_base() = 0;
 
+  /*! Get vector of default bins associated with this coverpoint */
+  virtual std::vector<bin_base*> get_default_bins_base()
+  {
+    return std::vector<bin_base*>();
+  }
+
   /*! Destructor */
   virtual ~coverpoint_base() { }
 
+};
+
+/*!
+ *  \class cross_select_node fc_base.hpp
+ *  \brief Node of a select expression of the bins of a cross
+ *
+ *  A select expression, as binsof(a.b) && !binsof(c) intersect {1},
+ *  selects products of the bins of the crossed coverpoints. A condition
+ *  selects the products which have one of a set of bins of a coverpoint,
+ *  and conditions are combined with !, && and ||. See fc4sc::binsof.
+ */
+class cross_select_node
+{
+public:
+
+  /*! Kind of the node */
+  enum op_t { condition_, not_, and_, or_ };
+
+  op_t op = condition_;
+
+  /*! Operands of !, && and || */
+  std::shared_ptr<const cross_select_node> lhs, rhs;
+
+  /*! Coverpoint of a condition */
+  const cvp_base* cvp = nullptr;
+
+  /*! Returns which bins of the coverpoint a condition selects */
+  std::function<std::vector<bool>(const cvp_base*)> select_bins;
+
+  /*! Position of the coverpoint in the cross, once resolved */
+  size_t position = 0;
+
+  /*! Bins of the coverpoint selected by a condition, once resolved */
+  std::vector<bool> bins;
+
+  /*!
+   * \brief Checks if a product of bins is selected
+   * \param product The index of a bin of each crossed coverpoint
+   */
+  bool matches(const std::vector<size_t>& product) const
+  {
+    switch (op)
+    {
+      case not_: return !lhs->matches(product);
+      case and_: return lhs->matches(product) && rhs->matches(product);
+      case or_: return lhs->matches(product) || rhs->matches(product);
+      default:
+        return position < product.size() && product[position] < bins.size() &&
+               bins[product[position]];
+    }
+  }
+
+  /*!
+   * \brief Returns a copy of this expression whose conditions know the
+   * positions and the selected bins of their coverpoints in a cross
+   * \param cvps The crossed coverpoints
+   */
+  std::shared_ptr<const cross_select_node> resolve(
+      const std::vector<cvp_base*>& cvps,
+      const std::vector<cvp_base*>* orig_cvps = nullptr) const
+  {
+    std::shared_ptr<cross_select_node> node = std::make_shared<cross_select_node>(*this);
+    if (op != condition_) {
+      node->lhs = lhs->resolve(cvps, orig_cvps);
+      if (rhs) node->rhs = rhs->resolve(cvps, orig_cvps);
+      return node;
+    }
+    const cvp_base* target_cvp = cvp;
+    if (orig_cvps != nullptr && orig_cvps->size() == cvps.size()) {
+      auto oit = std::find(orig_cvps->begin(), orig_cvps->end(), cvp);
+      if (oit != orig_cvps->end()) {
+        target_cvp = cvps[static_cast<size_t>(oit - orig_cvps->begin())];
+        node->cvp = target_cvp;
+      }
+    }
+    auto it = std::find(cvps.begin(), cvps.end(), target_cvp);
+    if (it == cvps.end())
+      throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
+    node->position = it - cvps.begin();
+    node->bins = select_bins(target_cvp);
+    return node;
+  }
+
+  void validate_non_deferred(const std::vector<cvp_base*>& cvps) const
+  {
+    if (op != condition_) {
+      lhs->validate_non_deferred(cvps);
+      if (rhs) rhs->validate_non_deferred(cvps);
+      return;
+    }
+    auto it = std::find(cvps.begin(), cvps.end(), cvp);
+    if (it == cvps.end())
+      throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
+    if (!cvp->has_deferred_bins()) {
+      (void)select_bins(cvp);
+    }
+  }
+};
+
+/*!
+ *  \class cross_bin_data_model fc_base.hpp
+ *  \brief Data of a user defined bin of a cross
+ *
+ *  A user defined bin of a cross holds the products of bins which its
+ *  select expression selects, as the SystemVerilog
+ *  "bins b = binsof(a.lo) && binsof(c);". An ignore bin or an illegal bin
+ *  of a cross has the type bin_t::ignore_ or bin_t::illegal_.
+ */
+class cross_bin_data_model
+{
+public:
+
+  /*! Name of the bin */
+  std::string name;
+
+  /*! Type of the bin: default_, ignore_ or illegal_ */
+  bin_t bin_type = default_;
+
+  /*! Select expression of the bin */
+  std::shared_ptr<const cross_select_node> select;
+
+  /*!
+   * Number of products of bins in the bin. The products of an ignore
+   * or illegal bin are not in the other bins. A bin without products is
+   * not counted in the coverage.
+   */
+  uint64_t size = 0;
+
+  /*! Number of samples which hit the bin */
+  uint64_t hits = 0;
 };
 
 /*!
@@ -536,11 +874,80 @@ public:
   /*! Cross options */
   cross_option option;
 
+  /*! Last synced option values from parent covergroup */
+  cross_option synced_option_;
+
+  /*! Per-field override flags for inherited options */
+  bool at_least_overridden_ = false;
+  bool cross_num_print_missing_overridden_ = false;
+
+  /*! Propagate inherited options from parent covergroup */
+  void sync_options_from_parent() override;
+
   /*! Vector of crossed coverpoints */
   std::vector<cvp_base_data_model*> cross_cvps;
 
+  /*!
+   * User defined bins, ignore bins and illegal bins of the cross. When
+   * there are any, get_cross_bins() holds the hits of the automatically
+   * created bins only: the products of bins which are in none of them.
+   */
+  std::vector<cross_bin_data_model> user_bins;
+
+  /*! Number of automatically created bins, when there are user_bins */
+  uint64_t auto_bins_size = 0;
+
   /*! Get cross bins */
   virtual const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const = 0;
+
+  /*!
+   * \brief Adds hits to an automatically created bin
+   * \param product The index of a bin of each crossed coverpoint
+   * \param count Number of hits to add
+   */
+  virtual void add_cross_bin_hits(const std::vector<size_t>& product, uint64_t count) = 0;
+
+  /*!
+   * \brief Checks if a product of bins is an automatically created bin,
+   * which is in no user defined bin, ignore bin or illegal bin
+   * \param product The index of a bin of each crossed coverpoint
+   */
+  bool is_auto_bin(const std::vector<size_t>& product) const
+  {
+    for (auto &bin : user_bins)
+      if (bin.select->matches(product))
+        return false;
+    return true;
+  }
+
+  /*!
+   * \brief Counts the bins of the cross which are in its coverage: the
+   * automatically created bins and the user defined bins which have
+   * products of bins, without the ignore and illegal bins
+   * \param covered Returns the number of bins hit at least option.at_least times
+   * \param total Returns the number of bins
+   */
+  void get_coverage_bins(int &covered, int &total) const
+  {
+    covered = 0;
+    if (user_bins.empty()) {
+      total = 1;
+      for (auto cvp : cross_cvps)
+        total *= cvp->size();
+    }
+    else {
+      total = auto_bins_size;
+      for (auto &bin : user_bins)
+      {
+        if (bin.bin_type != default_ || bin.size == 0)
+          continue;
+        total++;
+        covered += (bin.hits >= option.at_least);
+      }
+    }
+    for (auto &bin : get_cross_bins())
+      covered += (bin.second >= option.at_least);
+  }
 
 };
 
@@ -603,10 +1010,20 @@ public:
   scp_base_data_model* parent_scp = nullptr;
 
 
+  /*! Propagate inherited options to all child coverpoints and crosses */
+  void sync_options()
+  {
+    for (auto cvp : cvps) {
+      cvp->sync_options_from_parent();
+    }
+  }
+
   /*! Add coverpoint/cross data to the covergroup */
   void add_cvp_data(cvp_base_data_model* cvp_data)
   {
+    cvp_data->parent_cvg = this;
     cvps.push_back(cvp_data);
+    cvp_data->sync_options_from_parent();
   }
   
   /*!
@@ -614,6 +1031,7 @@ public:
    */
   virtual void accept_visitor(covVisitorBase& visitor)
   {
+    sync_options();
     visitor.visit(*this);
   }
 
@@ -916,6 +1334,26 @@ struct cvg_metadata
   /*! Vector of covergroup instances of this covergroup type */
   std::vector<cvg_base_data_model*> cvg_insts;
 
+  /*! Type options of the coverpoints and crosses, by their names */
+  std::map<std::string, cvp_type_option> cvp_type_options;
+
+  /*! Snapshot-diff tracking for distribute_first inheritance */
+  std::map<std::string, bool> synced_cvp_distribute_first_;
+  std::map<std::string, bool> cvp_distribute_first_overridden_;
+
+  void sync_cvp_type_option(const std::string& cvp_name)
+  {
+    cvp_type_option& cvp_opt = cvp_type_options[cvp_name];
+    bool& synced = synced_cvp_distribute_first_[cvp_name];
+    bool& overridden = cvp_distribute_first_overridden_[cvp_name];
+    if (cvp_opt.distribute_first != synced)
+      overridden = true;
+    if (!overridden) {
+      cvp_opt.distribute_first = type_option.distribute_first;
+      synced = cvp_opt.distribute_first;
+    }
+  }
+
   /*! Destructor */
   virtual ~cvg_metadata()
   {
@@ -926,6 +1364,83 @@ struct cvg_metadata
   }
 
 };
+
+inline cvp_type_option& cvp_base_data_model::type_option()
+{
+  if (parent_cvg == nullptr || parent_cvg->type_data == nullptr)
+    return own_type_option;
+  parent_cvg->type_data->sync_cvp_type_option(name);
+  return parent_cvg->type_data->cvp_type_options[name];
+}
+
+inline void coverpoint_base_data_model::sync_options_from_parent()
+{
+  if (option.at_least != synced_option_.at_least)
+    at_least_overridden_ = true;
+  if (option.auto_bin_max != synced_option_.auto_bin_max)
+    auto_bin_max_overridden_ = true;
+  if (option.detect_overlap != synced_option_.detect_overlap)
+    detect_overlap_overridden_ = true;
+
+  if (parent_cvg != nullptr) {
+    if (!at_least_overridden_) {
+      option.at_least = parent_cvg->option.at_least;
+      synced_option_.at_least = option.at_least;
+    }
+    if (!auto_bin_max_overridden_) {
+      option.auto_bin_max = parent_cvg->option.auto_bin_max;
+      synced_option_.auto_bin_max = option.auto_bin_max;
+    }
+    if (!detect_overlap_overridden_) {
+      option.detect_overlap = parent_cvg->option.detect_overlap;
+      synced_option_.detect_overlap = option.detect_overlap;
+    }
+    if (parent_cvg->type_data != nullptr) {
+      parent_cvg->type_data->sync_cvp_type_option(name);
+    }
+  }
+}
+
+inline void cross_base_data_model::sync_options_from_parent()
+{
+  if (option.at_least != synced_option_.at_least)
+    at_least_overridden_ = true;
+  if (option.cross_num_print_missing != synced_option_.cross_num_print_missing)
+    cross_num_print_missing_overridden_ = true;
+
+  if (parent_cvg != nullptr) {
+    if (!at_least_overridden_) {
+      option.at_least = parent_cvg->option.at_least;
+      synced_option_.at_least = option.at_least;
+    }
+    if (!cross_num_print_missing_overridden_) {
+      option.cross_num_print_missing = parent_cvg->option.cross_num_print_missing;
+      synced_option_.cross_num_print_missing = option.cross_num_print_missing;
+    }
+  }
+}
+
+/*!
+ * \brief Whether a covergroup type gives the options their SystemVerilog
+ * meaning, see cvg_type_option::strict_sv_options
+ */
+inline bool strict_sv_options(const cvg_metadata* type_data)
+{
+  return type_data != nullptr && type_data->type_option.strict_sv_options;
+}
+
+/*!
+ * \brief Whether get_inst_coverage() of a covergroup instance, and of its
+ * coverpoints and crosses, returns the type coverage: as in SystemVerilog,
+ * when merge_instances is set and option.get_inst_coverage is not
+ * \param cvg The covergroup instance, or nullptr for a coverpoint or cross
+ * which is in no covergroup
+ */
+inline bool inst_coverage_is_type_coverage(const cvg_base_data_model* cvg)
+{
+  return cvg != nullptr && strict_sv_options(cvg->type_data) &&
+         cvg->type_data->type_option.merge_instances && !cvg->option.get_inst_coverage;
+}
 
 /*!
  *  \class scp_metadata fc_base.hpp

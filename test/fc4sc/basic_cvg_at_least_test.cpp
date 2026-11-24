@@ -69,6 +69,14 @@ TEST(cvg_options, at_least) {
   basic_cg_2.sample(1);
 
   EXPECT_EQ(basic_cg_1.get_inst_coverage(), 100);
+  EXPECT_EQ(basic_cg_2.get_inst_coverage(), 0);
+  EXPECT_EQ(basic_cg_1.get_coverage(), 50);
+  EXPECT_EQ(basic_cg_2.get_coverage(), 50);
+  EXPECT_EQ(basic_cg_1.get_coverage(), basic_cg_2.get_coverage());
+
+  basic_cg_2.sample(1);
+
+  EXPECT_EQ(basic_cg_1.get_inst_coverage(), 100);
   EXPECT_EQ(basic_cg_2.get_inst_coverage(), 100);
   EXPECT_EQ(basic_cg_1.get_coverage(), 100);
   EXPECT_EQ(basic_cg_1.get_coverage(), basic_cg_2.get_coverage());
