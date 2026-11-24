@@ -922,7 +922,7 @@ public:
     return std::move(*this);
   }
 
-  void ensure_bins() const {
+  void ensure_bins() const override {
     if (valid_data.use_count() == 0 || crs_data == nullptr) return;
     if (crs_data->in_ensure_bins_ || has_sampled_) return;
     struct Guard {
@@ -954,7 +954,7 @@ public:
   /*!
    *  \brief Sampling function at cross level
    */
-  virtual void sample() 
+  virtual void sample() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1019,7 +1019,7 @@ public:
    *  get_inst_coverage option of the covergroup instance is set.
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_inst_coverage() const 
+  double get_inst_coverage() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1049,7 +1049,7 @@ public:
    *  \param total Total number of bins in this cross
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_inst_coverage(int &covered, int &total) const 
+  double get_inst_coverage(int &covered, int &total) const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1095,7 +1095,7 @@ public:
    *  across all the instances of the covergroup type it is in
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_coverage() const
+  double get_coverage() const override
   {
     int covered = 0;
     int total = 0;
@@ -1108,7 +1108,7 @@ public:
    *  \param total Total number of bins, summed over the instances
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_coverage(int &covered, int &total) const
+  double get_coverage(int &covered, int &total) const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1198,7 +1198,7 @@ public:
   /*!
    * \brief Returns cross bin misses
    */
-  uint64_t get_misses()
+  uint64_t get_misses() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1211,7 +1211,7 @@ public:
   /*!
    * \brief Returns cross coverage weight
    */
-  uint64_t get_weight()
+  uint64_t get_weight() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1221,7 +1221,7 @@ public:
     return this->crs_data->option.weight;
   };
 
-  uint64_t size() const
+  uint64_t size() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1239,7 +1239,7 @@ public:
   };
 
   /*! Get cross bins storage */
-  const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const
+  const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";

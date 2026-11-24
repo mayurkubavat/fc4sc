@@ -52,6 +52,7 @@
 #include "fc4sc_scope.hpp"
 #include "xml_printer.hpp"
 #include "fc4sc_coverage_db.hpp"
+#include "fc4sc_report.hpp"
 
 using fc4sc::interval;
 using fc4sc::bin;

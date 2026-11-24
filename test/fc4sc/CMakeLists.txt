@@ -67,7 +67,9 @@ if(TARGET SystemC::systemc)
   add_executable(fc4sc_systemc_tests
     systemc/systemc_types_test.cpp
     systemc/systemc_types_order2_test.cpp
-    systemc/systemc_strobe_test.cpp)
+    systemc/systemc_strobe_test.cpp
+    systemc/systemc_toggle_test.cpp
+    systemc/systemc_sva_test.cpp)
   target_link_libraries(fc4sc_systemc_tests PRIVATE FC4SC::fc4sc SystemC::systemc GTest::gtest)
   gtest_discover_tests(fc4sc_systemc_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})

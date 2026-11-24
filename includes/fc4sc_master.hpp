@@ -96,10 +96,70 @@ public:
 
   void add_scp_data(scp_base_data_model* scp_data, std::string scp_type_name, unsigned int cvg_file_id, uint32_t cvg_line)
   {
+    (void)scp_data;
+    (void)scp_type_name;
+    (void)cvg_file_id;
+    (void)cvg_line;
     std::cerr << "Cannot register sub scopes to default scope\n";
     throw("Cannot register sub scopes to default scope\n");
   }
 
+};
+
+class resolved_scope_data_model : public scp_base_data_model
+{
+public:
+  void add_cvg_data(cvg_base_data_model* cvg_data, std::string cvg_type_name, std::string scp_type_name, unsigned int cvg_file_id, uint32_t cvg_line) override
+  {
+    cvg_insts[cvg_data->name] = cvg_data;
+    cvgs[scp_type_name + "::" + cvg_type_name].push_back(cvg_data);
+    cvg_data->parent_scp = this;
+
+    scp_metadata* type_data;
+    if (fc4sc::global::get_scopes_data(this->cntxt).count(scp_type_name) > 0) {
+      type_data = fc4sc::global::get_scopes_data(this->cntxt)[scp_type_name];
+    } else {
+      type_data = new scp_metadata;
+      type_data->type_name = scp_type_name;
+      fc4sc::global::get_scopes_data(this->cntxt)[scp_type_name] = type_data;
+    }
+
+    if (type_data->cvg_type_table.count(cvg_type_name) > 0) {
+      type_data->cvg_type_table[cvg_type_name]->cvg_insts.push_back(cvg_data);
+    } else {
+      cvg_metadata* tmp = new cvg_metadata;
+      tmp->type_name = cvg_type_name;
+      tmp->scp_type_name = scp_type_name;
+      tmp->file_id = cvg_file_id;
+      tmp->line = cvg_line;
+      tmp->cvg_insts.push_back(cvg_data);
+      type_data->cvg_type_table[cvg_type_name] = tmp;
+    }
+    cvg_data->type_data = type_data->cvg_type_table[cvg_type_name];
+  }
+
+  void add_scp_data(scp_base_data_model* scp_data, std::string scp_type_name, unsigned int scp_file_id, uint32_t scp_line) override
+  {
+    child_scp_insts[scp_data->name] = scp_data;
+    child_scps[scp_type_name].push_back(scp_data);
+    scp_data->parent_scp = this;
+    if (fc4sc::global::get_scopes_data(this->cntxt).count(scp_type_name) > 0) {
+      scp_metadata* type_data = fc4sc::global::get_scopes_data(this->cntxt)[scp_type_name];
+      if (type_data->scp_insts.empty()) {
+        type_data->file_id = scp_file_id;
+        type_data->line = scp_line;
+      }
+      type_data->scp_insts.push_back(scp_data);
+    } else {
+      scp_metadata* tmp = new scp_metadata;
+      tmp->type_name = scp_type_name;
+      tmp->file_id = scp_file_id;
+      tmp->line = scp_line;
+      tmp->scp_insts.push_back(scp_data);
+      fc4sc::global::get_scopes_data(this->cntxt)[scp_type_name] = tmp;
+    }
+    scp_data->type_data = fc4sc::global::get_scopes_data(this->cntxt)[scp_type_name];
+  }
 };
 
 
@@ -344,6 +404,62 @@ public:
         dflt_scp = new default_scope(this);
       }
       return dflt_scp;
+    }
+
+    scp_base_data_model* internal_resolve_scope_path(
+        const std::vector<std::pair<std::string, std::string>>& path,
+        const std::string& file_name,
+        uint32_t line)
+    {
+      if (path.empty()) {
+        return internal_get_default_scope()->get_scp_data();
+      }
+      const uint32_t safe_line = (line == 0) ? 1U : line;
+      const unsigned int fid = internal_get_file_id(file_name.empty() ? std::string(__FILE__) : file_name);
+
+      scp_base_data_model* curr = nullptr;
+      for (size_t i = 0; i < top_scps.size(); ++i) {
+        scp_base_data_model* candidate = top_scps[i];
+        if (candidate != nullptr &&
+            dynamic_cast<default_scope_data_model*>(candidate) == nullptr &&
+            candidate->name == path[0].first) {
+          curr = candidate;
+          break;
+        }
+      }
+      if (curr == nullptr) {
+        resolved_scope_data_model* node = new resolved_scope_data_model;
+        node->cntxt = this;
+        node->name = path[0].first;
+        node->inst_file_id = fid;
+        node->inst_line = safe_line;
+        node->instance_id = internal_create_instance_id();
+        const std::string tname = path[0].second.empty() ? path[0].first : path[0].second;
+        internal_register_data(node, tname, fid, safe_line);
+        curr = node;
+      }
+
+      for (size_t i = 1; i < path.size(); ++i) {
+        auto it = curr->child_scp_insts.find(path[i].first);
+        if (it != curr->child_scp_insts.end() && it->second != nullptr) {
+          curr = it->second;
+          continue;
+        }
+        resolved_scope_data_model* child = new resolved_scope_data_model;
+        child->cntxt = this;
+        child->name = path[i].first;
+        child->inst_file_id = fid;
+        child->inst_line = safe_line;
+        child->instance_id = internal_create_instance_id();
+        const std::string leaf_type = path[i].second.empty() ? path[i].first : path[i].second;
+        const std::string full_type =
+            (curr->type_data != nullptr && !curr->type_data->type_name.empty())
+                ? (curr->type_data->type_name + "::" + leaf_type)
+                : leaf_type;
+        curr->add_scp_data(child, full_type, fid, safe_line);
+        curr = child;
+      }
+      return curr;
     }
 
   //};
@@ -627,7 +743,7 @@ public:
   int bin_total = 0;
   int bin_covered = 0;
 
-  void visit(scp_base_data_model& base){ }
+  void visit(scp_base_data_model&){ }
 
   void visit(cvg_base_data_model& base)
   {
@@ -847,6 +963,19 @@ public:
   static std::vector<scp_base_data_model*>& get_top_scopes(fc4sc::global* cvg_cntxt = fc4sc::global::getter())
   {
     return cvg_cntxt->internal_get_top_scopes();
+  }
+
+  /*!
+   * \brief Resolves or creates a hierarchical scope path in pure C++11
+   */
+  static scp_base_data_model* resolve_scope_path(
+      const std::vector<std::pair<std::string, std::string>>& path,
+      const std::string& file_name,
+      uint32_t line,
+      fc4sc::global* cvg_cntxt = fc4sc::global::getter())
+  {
+    if (cvg_cntxt == nullptr) cvg_cntxt = fc4sc::global::getter();
+    return cvg_cntxt->internal_resolve_scope_path(path, file_name, line);
   }
 
   /*!

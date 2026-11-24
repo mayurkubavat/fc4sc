@@ -386,3 +386,31 @@ TEST_F(SystemCStrobeTest, flush_pending_continues_after_illegal_bin_exception) {
   }
   fc4sc::global::delete_context(cntxt);
 }
+
+TEST_F(SystemCStrobeTest, post_zero_time_unflushed_reset_aba_30x) {
+  auto persist_cntxt = fc4sc::global::create_new_context();
+  auto cg_persist = std::unique_ptr<sysc_param_strobe_cg>(
+      new sysc_param_strobe_cg("cg_persist", __FILE__, __LINE__, persist_cntxt));
+
+  for (int iter = 0; iter < 30; ++iter) {
+    // Queue a strobe sample on cg_persist and advance only SC_ZERO_TIME without flushing,
+    // leaving sc_strobe_controller::pending_ non-empty across sc_simcontext::reset().
+    cg_persist->sample(0, 0);
+    sc_core::sc_start(sc_core::SC_ZERO_TIME);
+    sc_core::sc_get_curr_simcontext()->reset();
+
+    auto iter_cntxt = fc4sc::global::create_new_context();
+    {
+      sysc_param_strobe_cg cg_iter("cg_iter", __FILE__, __LINE__, iter_cntxt);
+      cg_iter.sample(1, 1);
+      sc_core::sc_start(5, sc_core::SC_NS);
+      EXPECT_EQ(cg_iter.cvp_a.get_bin_hit_count(1), 1u) << "iter=" << iter;
+      EXPECT_EQ(cg_iter.cvp_b.get_bin_hit_count(1), 1u) << "iter=" << iter;
+      EXPECT_EQ(cg_persist->cvp_a.get_bin_hit_count(0), static_cast<uint64_t>(iter + 1)) << "iter=" << iter;
+    }
+    fc4sc::global::delete_context(iter_cntxt);
+  }
+
+  cg_persist.reset();
+  fc4sc::global::delete_context(persist_cntxt);
+}

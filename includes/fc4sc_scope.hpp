@@ -262,7 +262,7 @@ class scope : public scp_base
 
 public:
 
-  scope(std::string name = "", std::string file_name = "", int line = 1, std::string inst_file_name = "", int inst_line = 1, fc4sc::global* cntxt = fc4sc::global::getter())
+  scope(std::string name = "", std::string = "", int = 1, std::string inst_file_name = "", int inst_line = 1, fc4sc::global* cntxt = fc4sc::global::getter())
   {
     scp_data->cntxt = cntxt;
     scp_data->name = name;
@@ -271,7 +271,7 @@ public:
     scp_data->instance_id = fc4sc::global::create_instance_id(scp_data->cntxt);
   }
 
-  scope(scp_base& p_scope, std::string name = "", std::string file_name = "", int line = 1, std::string inst_file_name = "", int inst_line = 1)
+  scope(scp_base& p_scope, std::string name = "", std::string = "", int = 1, std::string inst_file_name = "", int inst_line = 1)
   {
     scp_data->cntxt = p_scope.get_scp_data()->cntxt;
     scp_data->name = name;
