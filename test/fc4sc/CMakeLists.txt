@@ -52,7 +52,9 @@ gtest_discover_tests(fc4sc_tests
 add_executable(fc4sc_no_throw_tests
   main.cpp
   illegal_bin_sample_expression_test.cpp
-  cross_bin_select_test.cpp)
+  cross_bin_select_test.cpp
+  cross_with_queue_default_iff_test.cpp
+  uncovered_query_test.cpp)
 target_compile_definitions(fc4sc_no_throw_tests PRIVATE FC4SC_NO_THROW)
 target_link_libraries(fc4sc_no_throw_tests PRIVATE FC4SC::fc4sc GTest::gtest)
 
@@ -64,8 +66,47 @@ find_package(SystemCLanguage CONFIG QUIET)
 if(TARGET SystemC::systemc)
   add_executable(fc4sc_systemc_tests
     systemc/systemc_types_test.cpp
-    systemc/systemc_types_order2_test.cpp)
+    systemc/systemc_types_order2_test.cpp
+    systemc/systemc_strobe_test.cpp)
   target_link_libraries(fc4sc_systemc_tests PRIVATE FC4SC::fc4sc SystemC::systemc GTest::gtest)
   gtest_discover_tests(fc4sc_systemc_tests
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+  find_package(crave CONFIG QUIET)
+  if(TARGET crave::crave)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES crave::crave)
+    set(CMAKE_REQUIRED_QUIET TRUE)
+    check_cxx_source_compiles("
+      #include <crave/ConstrainedRandom.hpp>
+      #include <crave/experimental/Experimental.hpp>
+      int main() {
+        crave::crv_variable<int> x;
+        auto s = crave::soft(x() == 1);
+        (void)s;
+        return 0;
+      }
+    " FC4SC_CRAVE_HAS_SOFT)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    unset(CMAKE_REQUIRED_QUIET)
+
+    add_executable(fc4sc_crave_tests
+      crave/crave_cdv_test.cpp)
+    target_link_libraries(fc4sc_crave_tests PRIVATE FC4SC::fc4sc crave::crave SystemC::systemc GTest::gtest)
+    if(FC4SC_CRAVE_HAS_SOFT)
+      target_compile_definitions(fc4sc_crave_tests PRIVATE FC4SC_CRAVE_HAS_SOFT=1)
+    endif()
+    gtest_discover_tests(fc4sc_crave_tests
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  endif()
+
+  find_package(UVMSystemC CONFIG QUIET)
+  find_package(crave2uvm CONFIG QUIET)
+  if(TARGET crave2uvm::crave2uvm AND TARGET UVMSystemC::uvm-systemc)
+    add_executable(fc4sc_crave2uvm_tests
+      crave/crave2uvm_cdv_test.cpp)
+    target_link_libraries(fc4sc_crave2uvm_tests PRIVATE FC4SC::fc4sc crave2uvm::crave2uvm crave::crave UVMSystemC::uvm-systemc GTest::gtest)
+    gtest_discover_tests(fc4sc_crave2uvm_tests
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  endif()
 endif()

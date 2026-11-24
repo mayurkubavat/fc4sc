@@ -484,7 +484,7 @@ public:
     merged_cvp& merged = get_merged(base.name, true);
     if (first) {
       set_options(merged, base, base.option);
-      merged.has_user_bins = !base.user_bins.empty();
+      merged.has_user_bins = base.has_custom_auto_bins();
       merged.auto_bins_size = base.auto_bins_size;
     }
 

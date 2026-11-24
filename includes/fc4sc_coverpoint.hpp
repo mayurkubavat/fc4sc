@@ -124,6 +124,8 @@ private:
   friend class covergroup;
   // binsof selects bins of the coverpoint for the bins of a cross
   friend class binsof<T>;
+  template <typename... Args>
+  friend class cross;
   // friend functions that need access to the bin vectors -> add_to_cvp(coverpoint<T>&)
   friend class bin<T>;
   friend class bin_array<T>;
@@ -292,6 +294,7 @@ private:
     coverpoint<T>* cvp = new coverpoint<T>;
     cvp->cvp_data->name = this->name();
     cvp->cvp_data->option = this->option();
+    cvp->cvp_data->own_type_option = this->cvp_data->own_type_option;
     cvp->cvp_data->sample_expression_str = this->get_sample_expression_str();
     cvp->cvp_data->sample_condition_str = this->get_sample_condition_str();
     cvp->has_explicit_bins_ = this->has_explicit_bins_;
@@ -455,6 +458,10 @@ private:
   /*! Sampling switch */
   bool collect = true;
 
+  /*! Retained last canonicalized sampled value for cross tuple predicates */
+  T last_sampled_value_{};
+  bool has_last_sampled_value_ = false;
+
   /*! Whether the bins have been checked for option.detect_overlap */
   bool overlap_checked = false;
 
@@ -511,6 +518,11 @@ private:
    *  \brief Binary search in sorted map given a type T value
    */
   interval_map_iterator_t get_interval_bs(interval_map_t& interval_map, T val)
+  {
+    return interval_map.lower_bound(fc4sc::interval<T>(val,val));
+  }
+
+  typename interval_map_t::const_iterator get_interval_bs(const interval_map_t& interval_map, T val) const
   {
     return interval_map.lower_bound(fc4sc::interval<T>(val,val));
   }
@@ -724,16 +736,21 @@ private:
       overlap_checked = true;
       report_overlapping_bins();
     }
-    if (!collect) return;
-    has_sampled_ = true;
     this->last_sample_success = false;
+    this->last_bin_index_hit = 0;
     this->last_bins_hit.clear();
+    this->has_last_sampled_value_ = false;
+    if (!collect || (cvp_data->parent_cvg != nullptr && !cvp_data->parent_cvg->collect))
+      return;
+    has_sampled_ = true;
 
     if (fc4sc_type_traits<T>::is_nan(cvp_val)) {
       cvp_data->misses++;
       return;
     }
     const T cval = fc4sc_type_traits<T>::canonicalize(cvp_val);
+    this->last_sampled_value_ = cval;
+    this->has_last_sampled_value_ = true;
 
     // 1) Search if the value is in the ignore bins
     bool ignored = false;
@@ -930,6 +947,8 @@ public:
       trans_clean(rh.trans_clean),
       trans_samples(rh.trans_samples),
       collect(rh.collect),
+      last_sampled_value_(rh.last_sampled_value_),
+      has_last_sampled_value_(rh.has_last_sampled_value_),
       overlap_checked(rh.overlap_checked),
       regular_interval_map(rh.regular_interval_map),
       illegal_interval_map(rh.illegal_interval_map),
@@ -1163,6 +1182,10 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if (!is_collecting()) {
+      on_stopped_sample();
+      return;
+    }
     if (has_sample_expression) {
       bool cond;
       try {
@@ -1187,11 +1210,111 @@ public:
         this->last_sample_success = false;
         this->last_bin_index_hit = 0;
         this->last_bins_hit.clear();
+        this->has_last_sampled_value_ = false;
       }
     }
     else {
       this->sample(*sample_point);
     }
+  }
+
+  void on_stopped_sample() override
+  {
+    if (valid_data.use_count() == 0 || cvp_data == nullptr) return;
+    cvp_data->sync_options_from_parent();
+    ensure_bins();
+    if (!overlap_checked && cvp_data->option.detect_overlap) {
+      overlap_checked = true;
+      report_overlapping_bins();
+    }
+    this->last_sample_success = false;
+    this->last_bin_index_hit = 0;
+    this->last_bins_hit.clear();
+    this->has_last_sampled_value_ = false;
+  }
+
+  bool is_collecting() const override
+  {
+    if (valid_data.use_count() == 0 || cvp_data == nullptr) return false;
+    return collect && (cvp_data->parent_cvg == nullptr || cvp_data->parent_cvg->collect);
+  }
+
+  bool get_last_sampled_value(T& out) const
+  {
+    if (!has_last_sampled_value_) return false;
+    out = last_sampled_value_;
+    return true;
+  }
+
+  std::vector<size_t> matching_bin_indices(const T& val) const
+  {
+    typedef fc4sc_type_traits<T> traits;
+    std::vector<size_t> out;
+    if (traits::is_nan(val)) return out;
+    ensure_bins();
+    const T cval = traits::canonicalize(val);
+
+    auto ign_it = get_interval_bs(this->ignore_interval_map, cval);
+    if (ign_it != this->ignore_interval_map.end() &&
+        traits::in_interval(cval, ign_it->first.first, ign_it->first.second)) {
+      return out;
+    }
+
+    auto ill_it = get_interval_bs(this->illegal_interval_map, cval);
+    if (ill_it != this->illegal_interval_map.end() &&
+        traits::in_interval(cval, ill_it->first.first, ill_it->first.second)) {
+      return out;
+    }
+
+    auto reg_it = get_interval_bs(this->regular_interval_map, cval);
+    if (reg_it != this->regular_interval_map.end() &&
+        traits::in_interval(cval, reg_it->first.first, reg_it->first.second)) {
+      for (const auto& br : reg_it->second) {
+        out.push_back(static_cast<size_t>(br.first));
+      }
+      std::sort(out.begin(), out.end());
+      out.erase(std::unique(out.begin(), out.end()), out.end());
+    }
+    return out;
+  }
+
+  bool try_enumerate_bin_values(size_t bin_idx, uint64_t budget, std::vector<T>& out) const
+  {
+    typedef fc4sc_type_traits<T> traits;
+    out.clear();
+    ensure_bins();
+    if (bin_idx >= bins.size() || budget == 0) return false;
+    if (dynamic_cast<const transition_bin_data_model<T>*>(bins[bin_idx].bin_data) != nullptr)
+      return false;
+
+    for (const auto& intv : bins[bin_idx].bin_data->intervals) {
+      if (traits::equal(intv.first, intv.second)) {
+        if (out.size() >= budget) {
+          out.clear();
+          return false;
+        }
+        out.push_back(intv.first);
+      } else {
+        uint64_t dist = 0;
+        if (!traits::try_distance_u64(intv.first, intv.second, dist)) {
+          out.clear();
+          return false;
+        }
+        if (dist >= budget || out.size() > budget - 1 - dist) {
+          out.clear();
+          return false;
+        }
+        traits::enumerate_interval(intv.first, intv.second, out);
+      }
+    }
+
+    std::sort(out.begin(), out.end(), [](const T& a, const T& b) {
+      return traits::less(a, b);
+    });
+    out.erase(std::unique(out.begin(), out.end(), [](const T& a, const T& b) {
+      return traits::equal(a, b);
+    }), out.end());
+    return true;
   }
 
   /*!
@@ -1331,7 +1454,17 @@ public:
     collect = false;
   }
 
-  cvp_base_data_model* get_data()
+  cvp_base_data_model* get_data() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+
+    return cvp_data;
+  }
+
+  const cvp_base_data_model* get_data() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1344,7 +1477,17 @@ public:
   /*!
    * \brief Returns instance name
    */
-  std::string& name() 
+  std::string& name() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+
+    return cvp_data->name;
+  }
+
+  const std::string& name() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1357,7 +1500,18 @@ public:
   /*!
    * \brief Returns instance options
    */
-  cvp_option& option() 
+  cvp_option& option() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+
+    cvp_data->sync_options_from_parent();
+    return cvp_data->option;
+  }
+
+  const cvp_option& option() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1397,7 +1551,7 @@ public:
   /*!
    * \brief Returns a vector of pointers to base_bin for introspection
    */
-  std::vector<bin_base*> get_bins_base()
+  std::vector<bin_base*> get_bins_base() override
   {
     if (valid_data.use_count() > 0 && cvp_data != nullptr) {
       if (cvp_data->parent_cvg != nullptr && !cvp_data->in_ensure_bins_)
@@ -1412,10 +1566,25 @@ public:
     return bin_base_vec;
   }
 
+  std::vector<const bin_base*> get_bins_base() const override
+  {
+    if (valid_data.use_count() > 0 && cvp_data != nullptr) {
+      if (cvp_data->parent_cvg != nullptr && !cvp_data->in_ensure_bins_)
+        cvp_data->sync_options_from_parent();
+      ensure_bins();
+    }
+    std::vector<const bin_base*> bin_base_vec;
+    for (const auto& bin_it : bins)
+    {
+      bin_base_vec.push_back(&bin_it);
+    }
+    return bin_base_vec;
+  }
+
   /*!
    * \brief Returns a vector of pointers to base_bin for introspection
    */
-  std::vector<bin_base*> get_illegal_bins_base()
+  std::vector<bin_base*> get_illegal_bins_base() override
   {
     std::vector<bin_base*> bin_base_vec;
     for (auto &bin_it : illegal_bins)
@@ -1425,13 +1594,10 @@ public:
     return bin_base_vec;
   }
 
-  /*!
-   * \brief Returns a vector of pointers to base_bin for introspection
-   */
-  std::vector<bin_base*> get_ignore_bins_base()
+  std::vector<const bin_base*> get_illegal_bins_base() const override
   {
-    std::vector<bin_base*> bin_base_vec;
-    for (auto &bin_it : ignore_bins)
+    std::vector<const bin_base*> bin_base_vec;
+    for (const auto& bin_it : illegal_bins)
     {
       bin_base_vec.push_back(&bin_it);
     }
@@ -1441,7 +1607,30 @@ public:
   /*!
    * \brief Returns a vector of pointers to base_bin for introspection
    */
-  std::vector<bin_base*> get_default_bins_base()
+  std::vector<bin_base*> get_ignore_bins_base() override
+  {
+    std::vector<bin_base*> bin_base_vec;
+    for (auto &bin_it : ignore_bins)
+    {
+      bin_base_vec.push_back(&bin_it);
+    }
+    return bin_base_vec;
+  }
+
+  std::vector<const bin_base*> get_ignore_bins_base() const override
+  {
+    std::vector<const bin_base*> bin_base_vec;
+    for (const auto& bin_it : ignore_bins)
+    {
+      bin_base_vec.push_back(&bin_it);
+    }
+    return bin_base_vec;
+  }
+
+  /*!
+   * \brief Returns a vector of pointers to base_bin for introspection
+   */
+  std::vector<bin_base*> get_default_bins_base() override
   {
     std::vector<bin_base*> bin_base_vec;
     for (auto &bin_it : default_bins)
@@ -1449,6 +1638,152 @@ public:
       bin_base_vec.push_back(&bin_it);
     }
     return bin_base_vec;
+  }
+
+  std::vector<const bin_base*> get_default_bins_base() const override
+  {
+    std::vector<const bin_base*> bin_base_vec;
+    for (const auto& bin_it : default_bins)
+    {
+      bin_base_vec.push_back(&bin_it);
+    }
+    return bin_base_vec;
+  }
+
+  std::vector<interval_t<T>> get_uncovered_intervals() const
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    if (cvp_data->parent_cvg != nullptr && !cvp_data->in_ensure_bins_)
+      cvp_data->sync_options_from_parent();
+    ensure_bins();
+    const unsigned int at_least = cvp_data->option.at_least;
+    if (at_least == 0)
+      return std::vector<interval_t<T>>();
+
+    std::vector<interval_t<T>> raw_excl;
+    for (const auto& ib : ignore_bins) {
+      if (ib.bin_data != nullptr && !ib.bin_data->is_transition_bin())
+        raw_excl.insert(raw_excl.end(), ib.bin_data->intervals.begin(), ib.bin_data->intervals.end());
+    }
+    for (const auto& ib : illegal_bins) {
+      if (ib.bin_data != nullptr && !ib.bin_data->is_transition_bin())
+        raw_excl.insert(raw_excl.end(), ib.bin_data->intervals.begin(), ib.bin_data->intervals.end());
+    }
+    auto excl_norm = detail::normalize_uncovered_intervals<T>(raw_excl, false);
+
+    std::vector<interval_t<T>> raw_uncovered;
+    for (const auto& b : bins) {
+      if (b.bin_data == nullptr || b.bin_data->bin_type != bin_t::default_) continue;
+      if (b.bin_data->is_transition_bin()) continue;
+      if (b.get_hitcount() >= at_least) continue;
+      raw_uncovered.insert(raw_uncovered.end(), b.bin_data->intervals.begin(), b.bin_data->intervals.end());
+    }
+    return detail::subtract_excluded_intervals<T>(raw_uncovered, excl_norm, true);
+  }
+
+  std::vector<interval_t<T>> get_uncovered_intervals(size_t bin_index) const
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    if (cvp_data->parent_cvg != nullptr && !cvp_data->in_ensure_bins_)
+      cvp_data->sync_options_from_parent();
+    ensure_bins();
+    if (bin_index >= bins.size())
+      throw std::out_of_range("coverpoint::get_uncovered_intervals: bin_index out of range");
+
+    const unsigned int at_least = cvp_data->option.at_least;
+    if (at_least == 0)
+      return std::vector<interval_t<T>>();
+    const auto& b = bins[bin_index];
+    if (b.bin_data == nullptr || b.bin_data->bin_type != bin_t::default_ || b.bin_data->is_transition_bin())
+      return std::vector<interval_t<T>>();
+    if (b.get_hitcount() >= at_least)
+      return std::vector<interval_t<T>>();
+
+    std::vector<interval_t<T>> raw_excl;
+    for (const auto& ib : ignore_bins) {
+      if (ib.bin_data != nullptr && !ib.bin_data->is_transition_bin())
+        raw_excl.insert(raw_excl.end(), ib.bin_data->intervals.begin(), ib.bin_data->intervals.end());
+    }
+    for (const auto& ib : illegal_bins) {
+      if (ib.bin_data != nullptr && !ib.bin_data->is_transition_bin())
+        raw_excl.insert(raw_excl.end(), ib.bin_data->intervals.begin(), ib.bin_data->intervals.end());
+    }
+    auto excl_norm = detail::normalize_uncovered_intervals<T>(raw_excl, false);
+    return detail::subtract_excluded_intervals<T>(b.bin_data->intervals, excl_norm, true);
+  }
+
+  std::vector<interval_t<std::string>> get_uncovered_intervals_str() const override
+  {
+    typedef fc4sc_type_traits<T> traits;
+    auto ivs = get_uncovered_intervals();
+    std::vector<interval_t<std::string>> out;
+    out.reserve(ivs.size());
+    for (const auto& iv : ivs) {
+      out.push_back(interval_t<std::string>(traits::to_string(iv.first), traits::to_string(iv.second)));
+    }
+    return out;
+  }
+
+  std::vector<interval_t<int>> get_uncovered_intervals_to_int() const override
+  {
+    typedef fc4sc_type_traits<T> traits;
+    auto ivs = get_uncovered_intervals();
+    std::vector<interval_t<int>> out;
+    out.reserve(ivs.size());
+    for (const auto& iv : ivs) {
+      out.push_back(interval_t<int>(traits::to_int(iv.first), traits::to_int(iv.second)));
+    }
+    return out;
+  }
+
+  std::vector<uncovered_bin_info> get_uncovered_bin_infos() const override
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    if (cvp_data->parent_cvg != nullptr && !cvp_data->in_ensure_bins_)
+      cvp_data->sync_options_from_parent();
+    ensure_bins();
+
+    std::vector<uncovered_bin_info> out;
+    const unsigned int at_least = cvp_data->option.at_least;
+    if (at_least == 0)
+      return out;
+
+    for (size_t i = 0; i < bins.size(); ++i) {
+      const auto& b = bins[i];
+      if (b.bin_data == nullptr || b.bin_data->bin_type != bin_t::default_) continue;
+      const uint64_t hits = b.get_hitcount();
+      if (hits >= at_least) continue;
+      uncovered_bin_info info;
+      info.name = b.bin_data->name;
+      info.index = i;
+      info.hits = hits;
+      info.at_least = at_least;
+      info.is_cross = false;
+      info.is_auto = !has_explicit_bins_;
+      info.is_transition = b.bin_data->is_transition_bin();
+      out.push_back(std::move(info));
+    }
+    return out;
+  }
+
+  std::vector<std::string> get_uncovered_bins() const override
+  {
+    auto infos = get_uncovered_bin_infos();
+    std::vector<std::string> names;
+    names.reserve(infos.size());
+    for (const auto& info : infos) {
+      names.push_back(info.name);
+    }
+    return names;
   }
 
   std::string& get_sample_expression_str()
@@ -1484,6 +1819,11 @@ static_assert(std::is_same<bool,cond_ret_type>::value,"sample condition expressi
   coverpoint<ret_type>* cvp_fact;
 
 public:
+
+  coverpoint<ret_type>* get_cvp_fact() const
+  {
+    return cvp_fact;
+  }
 
   /*!
    * \brief binds variables to sample expression

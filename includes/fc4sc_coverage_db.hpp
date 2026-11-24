@@ -791,7 +791,12 @@ public:
       reindex_cross_bins(*copy, from, into);
       xml_node* match = crosses.match(name_key(*crs));
       if (match != nullptr) {
-        merge_children_counts(*match, *copy, "crossBin", name_key);
+        auto cross_bin_key = [](const xml_node& n) {
+          std::string t = n.get("type");
+          if (t.empty()) t = "default";
+          return t + "\n" + n.get("name");
+        };
+        merge_children_counts(*match, *copy, "crossBin", cross_bin_key);
         continue;
       }
       crosses.add(name_key(*crs), copy.get());
@@ -1062,8 +1067,13 @@ private:
       merge_coverpoint(a, b, where);
     });
     merge_children(into, from, "cross", name_key, [](xml_node& a, const xml_node& b) {
-      // the bins of a cross are known by their names, as <0,1>
-      merge_children_counts(a, b, "crossBin", name_key);
+      // the bins of a cross are known by their type and name
+      auto cross_bin_key = [](const xml_node& n) {
+        std::string t = n.get("type");
+        if (t.empty()) t = "default";
+        return t + "\n" + n.get("name");
+      };
+      merge_children_counts(a, b, "crossBin", cross_bin_key);
     });
   }
 
@@ -1392,9 +1402,25 @@ private:
       data.owner_->ensure_bins();
     for (auto bin : crs.elements("crossBin"))
     {
-      if (bin->get("type") == "ignore") continue;
+      const std::string type = bin->get("type");
       const std::string name = bin->get("name");
       auto indices = int_list(*bin, "index");
+      if (type == "ignore") {
+        bool all_neg = !indices.empty();
+        for (auto i : indices)
+          all_neg = all_neg && (i < 0);
+        if (all_neg) {
+          const uint64_t count = coverage_count(*bin);
+          for (auto &user : data.user_bins) {
+            if (user.name == name && user.bin_type == bin_t::default_bin_) {
+              user.hits = add_saturated(user.hits, count);
+              loaded++;
+              break;
+            }
+          }
+        }
+        continue;
+      }
       bool product = !indices.empty();
       for (auto i : indices)
         product = product && (i >= 0);
@@ -1407,7 +1433,7 @@ private:
           valid = static_cast<uint64_t>(indices[i]) < data.cross_cvps[i]->size();
           key.push_back(static_cast<size_t>(indices[i]));
         }
-        if (!valid || (!data.user_bins.empty() && !data.is_auto_bin(key))) {
+        if (!valid || (data.has_custom_auto_bins() && !data.is_auto_bin(key))) {
           missing("bin " + name + " of cross " + path);
           continue;
         }

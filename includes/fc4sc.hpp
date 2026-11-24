@@ -73,12 +73,20 @@ using fc4sc::illegal_transition_bin;
 using fc4sc::ignore_transition_bin;
 using fc4sc::default_sequence_bin;
 using fc4sc::cross_bin;
+using fc4sc::cross_bin_array;
 using fc4sc::ignore_cross_bin;
 using fc4sc::illegal_cross_bin;
+using fc4sc::default_cross_bin;
+using fc4sc::cross_iff;
+using fc4sc::cross_with;
+using fc4sc::CrossValType;
+using fc4sc::CrossQueueType;
+using fc4sc::typed_covergroup;
 using fc4sc::fc4sc_type_traits;
 using fc4sc::fc4sc_enum_traits;
 using fc4sc::half_open_interval;
 using fc4sc::tolerance;
 using fc4sc::percent_tolerance;
+using fc4sc::uncovered_bin_info;
 
 #endif /* FC4SC_HPP */

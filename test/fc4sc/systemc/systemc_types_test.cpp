@@ -205,6 +205,129 @@ TEST(systemc_types, auto_bins_tolerances_wildcards_and_xz_range_reject) {
   fc4sc::global::delete_context(cntxt);
 }
 
+class sysc_cross_cg : public covergroup {
+public:
+  CG_CONS(sysc_cross_cg) {};
+  sc_dt::sc_int<8> si = 0;
+  sc_dt::sc_lv<4> lv = "0000";
+  SAMPLE_CG(si, lv);
+
+  COVERPOINT(sc_dt::sc_int<8>, cvp_si, si) {
+    bin<sc_dt::sc_int<8>>("neg", interval<sc_dt::sc_int<8>>(-4, -1)),
+    bin<sc_dt::sc_int<8>>("pos", interval<sc_dt::sc_int<8>>(0, 3))
+  };
+
+  COVERPOINT(sc_dt::sc_lv<4>, cvp_lv, lv) {
+    bin<sc_dt::sc_lv<4>>("zero", sc_dt::sc_lv<4>("0000")),
+    bin<sc_dt::sc_lv<4>>("one", sc_dt::sc_lv<4>("0001")),
+    bin<sc_dt::sc_lv<4>>("xval", sc_dt::sc_lv<4>("000X"))
+  };
+
+  cross<sc_dt::sc_int<8>, sc_dt::sc_lv<4>> crs = cross<sc_dt::sc_int<8>, sc_dt::sc_lv<4>>(
+      this, "crs", &cvp_si, &cvp_lv,
+      cross_bin("qsel", CrossQueueType<sc_dt::sc_int<8>, sc_dt::sc_lv<4>>{
+          {sc_dt::sc_int<8>(-1), sc_dt::sc_lv<4>("000X")},
+          {sc_dt::sc_int<8>(2), sc_dt::sc_lv<4>("0001")}}),
+      default_cross_bin("other"));
+
+  cross<sc_dt::sc_int<8>, sc_dt::sc_lv<4>> crs_w = cross<sc_dt::sc_int<8>, sc_dt::sc_lv<4>>(
+      this, "crs_w", &cvp_si, &cvp_lv,
+      cross_bin("pos_01").with([](sc_dt::sc_int<8> s, sc_dt::sc_lv<4> l) {
+        return s > 0 && l.is_01();
+      }));
+};
+
+class sysc_derived_cross_cg : public sysc_cross_cg {
+public:
+  CG_EXTEND(sysc_derived_cross_cg, sysc_cross_cg) {};
+  sc_dt::sc_uint<4> su = 0;
+  SAMPLE_CG(si, lv, su);
+
+  COVERPOINT(sc_dt::sc_uint<4>, cvp_su, su) {
+    bin<sc_dt::sc_uint<4>>("zero", sc_dt::sc_uint<4>(0)),
+    bin<sc_dt::sc_uint<4>>("one", sc_dt::sc_uint<4>(1))
+  };
+
+  cross<sc_dt::sc_int<8>, sc_dt::sc_uint<4>> crs_ext = cross<sc_dt::sc_int<8>, sc_dt::sc_uint<4>>(
+      this, "crs_ext", &cvp_si, &cvp_su,
+      cross_bin("q_ign", CrossQueueType<sc_dt::sc_int<8>, sc_dt::sc_uint<4>>{
+          {sc_dt::sc_int<8>(-1), sc_dt::sc_uint<4>(0)}}),
+      cross_bin("q_ok", CrossQueueType<sc_dt::sc_int<8>, sc_dt::sc_uint<4>>{
+          {sc_dt::sc_int<8>(2), sc_dt::sc_uint<4>(1)}}),
+      ignore_cross_bin("ign", CrossQueueType<sc_dt::sc_int<8>, sc_dt::sc_uint<4>>{
+          {sc_dt::sc_int<8>(-1), sc_dt::sc_uint<4>(0)}}),
+      default_cross_bin("rest"));
+};
+
+TEST(systemc_types, cross_with_and_queue) {
+  auto cntxt = fc4sc::global::create_new_context();
+  {
+    sysc_cross_cg cg("cg", __FILE__, __LINE__, cntxt);
+    cg.sample(sc_dt::sc_int<8>(-1), sc_dt::sc_lv<4>("000X"));
+    cg.sample(sc_dt::sc_int<8>(2), sc_dt::sc_lv<4>("0001"));
+    cg.sample(sc_dt::sc_int<8>(1), sc_dt::sc_lv<4>("0000"));
+    EXPECT_EQ(cg.crs.get_inst_coverage(), 100.0);
+    auto* data = static_cast<fc4sc::cross_base_data_model*>(cg.crs.get_data());
+    ASSERT_EQ(data->user_bins.size(), 2u);
+    EXPECT_EQ(data->user_bins[0].hits, 2u);
+    EXPECT_EQ(data->user_bins[1].hits, 1u);
+    auto* wdata = static_cast<fc4sc::cross_base_data_model*>(cg.crs_w.get_data());
+    ASSERT_EQ(wdata->user_bins.size(), 1u);
+    EXPECT_EQ(wdata->user_bins[0].hits, 2u);
+
+    sysc_derived_cross_cg dcg("dcg", __FILE__, __LINE__, cntxt);
+    EXPECT_EQ(dcg.type_name(), "sysc_derived_cross_cg");
+    auto* ext_data = static_cast<fc4sc::cross_base_data_model*>(dcg.crs_ext.get_data());
+    (void)dcg.crs_ext.size();
+    EXPECT_EQ(ext_data->user_bins[0].size, 0u);
+    EXPECT_EQ(ext_data->user_bins[1].size, 1u);
+    dcg.sample(sc_dt::sc_int<8>(2), sc_dt::sc_lv<4>("0001"), sc_dt::sc_uint<4>(1));
+    EXPECT_EQ(dcg.crs_ext.get_inst_coverage(), 100.0);
+  }
+  fc4sc::global::delete_context(cntxt);
+}
+
+TEST(systemc_types, sc_lv_prev_and_0X_prefix_safety) {
+  typedef fc4sc_type_traits<sc_dt::sc_lv<4>> lv4_traits;
+  typedef fc4sc_type_traits<sc_dt::sc_lv<3>> lv3_traits;
+
+  // prev() on 4-state boundary must skip all intermediate 2-state values (never return is_01())
+  const sc_dt::sc_lv<4> v_000X("0b000X");
+  const sc_dt::sc_lv<4> v_001Z("0b001Z");
+  EXPECT_EQ(lv4_traits::next(v_000X), v_001Z);
+  EXPECT_EQ(lv4_traits::prev(v_001Z), v_000X);
+  EXPECT_FALSE(lv4_traits::prev(v_001Z).is_01());
+
+  const sc_dt::sc_lv<4> v_010Z("0b010Z");
+  const sc_dt::sc_lv<4> v_00XX("0b00XX");
+  EXPECT_EQ(lv4_traits::next(v_00XX), v_010Z);
+  EXPECT_EQ(lv4_traits::prev(v_010Z), v_00XX);
+
+  const sc_dt::sc_lv<4> v_000Z("0b000Z");
+  EXPECT_EQ(lv4_traits::prev(v_000Z), sc_dt::sc_lv<4>("0b1111"));
+
+  // half_open_interval(00X, 01Z) must yield [00X, 00X] (lo <= hi, 4-state)
+  const auto ho = fc4sc::half_open_interval(sc_dt::sc_lv<3>("0b00X"), sc_dt::sc_lv<3>("0b01Z"));
+  EXPECT_EQ(ho.first, sc_dt::sc_lv<3>("0b00X"));
+  EXPECT_EQ(ho.second, sc_dt::sc_lv<3>("0b00X"));
+
+  // "0X*" bit patterns must never be misparsed as hex or trigger E202
+  const sc_dt::sc_lv<3> v_0X0("0b0X0");
+  const sc_dt::sc_lv<3> v_0X1("0b0X1");
+  const sc_dt::sc_lv<3> v_0XZ("0b0XZ");
+  EXPECT_EQ(lv3_traits::next(v_0X0), v_0X1);
+  EXPECT_EQ(lv3_traits::prev(v_0X1), v_0X0);
+  EXPECT_EQ(lv3_traits::next(v_0X1), v_0XZ);
+  EXPECT_EQ(lv3_traits::prev(v_0XZ), v_0X1);
+
+  for (const sc_dt::sc_lv<3>& sample : {v_0X0, v_0X1, v_0XZ}) {
+    const std::string enc = lv3_traits::to_ucis_integer(sample);
+    sc_dt::sc_lv<3> dec("0b000");
+    ASSERT_TRUE(lv3_traits::from_ucis_integer(enc, dec));
+    EXPECT_EQ(dec, sample);
+  }
+}
+
 int sc_main(int ac, char* av[]) {
   testing::InitGoogleTest(&ac, av);
   return RUN_ALL_TESTS();
