@@ -388,6 +388,99 @@ std::vector<interval_t<T>> values_to_intervals(std::vector<T> values)
   return intervals;
 }
 
+namespace detail {
+
+template <typename T>
+inline std::vector<interval_t<T>> normalize_uncovered_intervals(
+    const std::vector<interval_t<T>>& raw,
+    bool merge_adjacent) {
+  typedef fc4sc_type_traits<T> traits;
+  std::vector<interval_t<T>> sorted;
+  sorted.reserve(raw.size());
+  for (const auto& iv : raw) {
+    sorted.push_back(traits::validate_interval(iv.first, iv.second));
+  }
+  if (sorted.empty()) return sorted;
+
+  std::sort(sorted.begin(), sorted.end(), [](const interval_t<T>& a, const interval_t<T>& b) {
+    if (!traits::equal(a.first, b.first))
+      return traits::less(a.first, b.first);
+    return traits::less(a.second, b.second);
+  });
+
+  std::vector<interval_t<T>> out;
+  out.push_back(sorted[0]);
+  const T tmax = traits::max_value();
+
+  for (size_t i = 1; i < sorted.size(); ++i) {
+    interval_t<T>& back = out.back();
+    const interval_t<T>& cur = sorted[i];
+    const bool overlaps = !traits::less(back.second, cur.first);
+    const bool adjacent = merge_adjacent &&
+        traits::is_discrete &&
+        !traits::equal(back.second, tmax) &&
+        traits::equal(traits::next(back.second), cur.first) &&
+        fc4sc_interval_merge_traits<T>::can_merge_adjacent(back.first, cur.second);
+    if (overlaps || adjacent) {
+      if (traits::less(back.second, cur.second))
+        back.second = cur.second;
+    } else {
+      out.push_back(cur);
+    }
+  }
+  return out;
+}
+
+template <typename T>
+inline std::vector<interval_t<T>> subtract_excluded_intervals(
+    const std::vector<interval_t<T>>& src,
+    const std::vector<interval_t<T>>& excl_norm,
+    bool merge_adjacent) {
+  typedef fc4sc_type_traits<T> traits;
+  if (src.empty()) return std::vector<interval_t<T>>();
+  if (excl_norm.empty()) return normalize_uncovered_intervals<T>(src, merge_adjacent);
+
+  const T tmin = traits::min_value();
+  const T tmax = traits::max_value();
+  std::vector<interval_t<T>> kept;
+
+  for (const auto& raw_iv : src) {
+    interval_t<T> iv = traits::validate_interval(raw_iv.first, raw_iv.second);
+    T cur = iv.first;
+    const T b = iv.second;
+    bool done = false;
+
+    for (const auto& ex : excl_norm) {
+      if (traits::less(ex.second, cur)) continue;
+      if (traits::less(b, ex.first)) break;
+      if (traits::less(cur, ex.first)) {
+        if (!traits::equal(ex.first, tmin)) {
+          T left_hi = traits::prev(ex.first);
+          if (!traits::less(left_hi, cur)) {
+            kept.push_back(interval(cur, left_hi));
+          }
+        }
+      }
+      if (!traits::less(ex.second, b)) {
+        done = true;
+        break;
+      }
+      if (traits::equal(ex.second, tmax)) {
+        done = true;
+        break;
+      }
+      cur = traits::next(ex.second);
+    }
+    if (!done && !traits::less(b, cur)) {
+      kept.push_back(interval(cur, b));
+    }
+  }
+
+  return normalize_uncovered_intervals<T>(kept, merge_adjacent);
+}
+
+} // namespace detail
+
 /*!
  * \brief Defines a class for bin data model
  * \tparam T Type of values in this bin
@@ -810,6 +903,46 @@ public:
       throw("Error: coverage data has been deleted");
     }
     return bin_data->intervals.empty();
+  }
+
+  const bin_t& bin_type() const override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return bin_data->bin_type;
+  }
+
+  const std::vector<uint64_t>& interval_hits() const override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return bin_data->interval_hits;
+  }
+
+  const std::string& name() const override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return bin_data->name;
+  }
+
+  std::vector<interval_t<T>> get_uncovered_intervals(unsigned int at_least = 1) const
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    if (bin_data->bin_type != bin_t::default_ || bin_data->is_transition_bin())
+      return std::vector<interval_t<T>>();
+    if (at_least == 0 || get_hitcount() >= at_least)
+      return std::vector<interval_t<T>>();
+    return detail::normalize_uncovered_intervals<T>(bin_data->intervals, true);
   }
 
   friend std::vector<interval_t<T>> reunion<T>(const bin<T>& lhs, const std::vector<interval_t<T>>& rhs);
@@ -1994,6 +2127,10 @@ template <class T>
 class transition_bin_data_model : public bin_data_model<T>
 {
 public:
+  bool is_transition_bin() const override
+  {
+    return true;
+  }
 
   /*! The value sequences of this bin. interval_hits holds their hit counts */
   std::vector<std::vector<T>> sequences;

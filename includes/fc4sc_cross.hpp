@@ -1070,7 +1070,17 @@ public:
     return (real >= this->crs_data->option.goal) ? 100 : real;
   }
 
-  cvp_base_data_model* get_data()
+  cvp_base_data_model* get_data() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+
+    return crs_data;
+  }
+
+  const cvp_base_data_model* get_data() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1140,7 +1150,17 @@ public:
   /*!
    * \brief Returns instance name
    */
-  std::string& name() 
+  std::string& name() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+
+    return crs_data->name;
+  }
+
+  const std::string& name() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1153,7 +1173,18 @@ public:
   /*!
    * \brief Returns instance options
    */
-  cross_option& option() 
+  cross_option& option() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+
+    crs_data->sync_options_from_parent();
+    return crs_data->option;
+  }
+
+  const cross_option& option() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1220,7 +1251,7 @@ public:
   }
 
   /*! Get crossed coverpoints storage */
-  const std::vector<cvp_base *>& get_cross_coverpoints() const
+  const std::vector<cvp_base *>& get_cross_coverpoints() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1228,6 +1259,358 @@ public:
     }
 
     return cvps_vec;
+  }
+
+private:
+  template <size_t I>
+  typename std::enable_if<I == sizeof...(Args), void>::type
+  matching_bins_impl(const CrossValType&, std::vector<std::vector<size_t>>&, bool&) const {}
+
+  template <size_t I>
+  typename std::enable_if<(I < sizeof...(Args)), void>::type
+  matching_bins_impl(const CrossValType& tup, std::vector<std::vector<size_t>>& dims, bool& ok) const
+  {
+    auto* cvp = std::get<I>(typed_cvps_);
+    if (cvp == nullptr) {
+      ok = false;
+      return;
+    }
+    dims[I] = cvp->matching_bin_indices(std::get<I>(tup));
+    if (dims[I].empty()) {
+      ok = false;
+      return;
+    }
+    matching_bins_impl<I + 1>(tup, dims, ok);
+  }
+
+  template <size_t I>
+  typename std::enable_if<I == sizeof...(Args), void>::type
+  tuple_to_strings_impl(const CrossValType&, std::vector<std::string>&) const {}
+
+  template <size_t I>
+  typename std::enable_if<(I < sizeof...(Args)), void>::type
+  tuple_to_strings_impl(const CrossValType& tup, std::vector<std::string>& out) const
+  {
+    typedef typename std::tuple_element<I, CrossValType>::type elem_t;
+    out.push_back(fc4sc_type_traits<elem_t>::to_string(std::get<I>(tup)));
+    tuple_to_strings_impl<I + 1>(tup, out);
+  }
+
+  bool is_tuple_illegal(const CrossValType& tup,
+                        const std::vector<std::vector<size_t>>& dims,
+                        const void* const* elem_ptrs) const
+  {
+    if (dims.empty()) return false;
+    std::vector<size_t> pos(dims.size(), 0);
+    while (true) {
+      std::vector<size_t> prod(dims.size());
+      for (size_t k = 0; k < dims.size(); ++k)
+        prod[k] = dims[k][pos[k]];
+      for (const auto& ub : crs_data->user_bins) {
+        if (ub.bin_type != illegal_ || !ub.select) continue;
+        if (ub.iff_cond && !ub.iff_cond()) continue;
+        if (ub.select->matches_tuple(prod, &tup, elem_ptrs))
+          return true;
+      }
+      size_t p = dims.size();
+      while (p > 0 && ++pos[p - 1] == dims[p - 1].size()) {
+        pos[p - 1] = 0;
+        --p;
+      }
+      if (p == 0) break;
+    }
+    return false;
+  }
+
+  bool is_product_excluded(const std::vector<size_t>& prod,
+                           const CrossValType& tup,
+                           const void* const* elem_ptrs) const
+  {
+    for (const auto& ub : crs_data->user_bins) {
+      if ((ub.bin_type != ignore_ && ub.bin_type != illegal_) || !ub.select)
+        continue;
+      if (ub.iff_cond && !ub.iff_cond())
+        continue;
+      if (ub.select->matches_tuple(prod, &tup, elem_ptrs))
+        return true;
+    }
+    return false;
+  }
+
+  bool is_tuple_valid_base(const CrossValType& tup,
+                           std::array<const void*, sizeof...(Args)>& elem_ptrs,
+                           std::vector<std::vector<size_t>>& dims) const
+  {
+    if (cross_with_pred_ && !cross_with_pred_(&tup))
+      return false;
+    dims.assign(sizeof...(Args), std::vector<size_t>());
+    bool ok = true;
+    matching_bins_impl<0>(tup, dims, ok);
+    if (!ok) return false;
+    fill_elem_ptrs_impl<0>(tup, elem_ptrs);
+    if (is_tuple_illegal(tup, dims, elem_ptrs.data()))
+      return false;
+    return true;
+  }
+
+public:
+  std::vector<uncovered_bin_info> get_uncovered_bin_infos() const override
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    crs_data->sync_options_from_parent();
+    ensure_bins();
+
+    std::vector<uncovered_bin_info> out;
+    const unsigned int at_least = crs_data->option.at_least;
+    if (at_least == 0)
+      return out;
+
+    if (!crs_data->has_default_bin() && !cvps_vec.empty()) {
+      std::vector<size_t> sizes;
+      std::vector<std::vector<const bin_base*>> cvp_bins;
+      sizes.reserve(cvps_vec.size());
+      cvp_bins.reserve(cvps_vec.size());
+      bool all_nonempty = true;
+      for (auto* cvp : cvps_vec) {
+        const size_t sz = static_cast<size_t>(cvp->size());
+        sizes.push_back(sz);
+        if (sz == 0) {
+          all_nonempty = false;
+          break;
+        }
+        auto* cbase = dynamic_cast<const coverpoint_base*>(cvp);
+        if (cbase != nullptr)
+          cvp_bins.push_back(cbase->get_bins_base());
+        else
+          cvp_bins.push_back(std::vector<const bin_base*>());
+      }
+      if (all_nonempty) {
+        const auto& hit_map = crs_data->get_cross_bins();
+        std::vector<size_t> product(sizes.size(), 0);
+        do {
+          if (crs_data->has_custom_auto_bins() && !crs_data->is_auto_bin(product))
+            continue;
+          auto hit_it = hit_map.find(product);
+          const uint64_t hits = (hit_it != hit_map.end()) ? hit_it->second : 0;
+          if (hits >= at_least)
+            continue;
+
+          std::stringstream ss;
+          ss << "<";
+          for (size_t k = 0; k < product.size(); ++k) {
+            if (k > 0) ss << ",";
+            if (k < cvp_bins.size() && product[k] < cvp_bins[k].size() && cvp_bins[k][product[k]] != nullptr)
+              ss << cvp_bins[k][product[k]]->name();
+            else
+              ss << product[k];
+          }
+          ss << ">";
+
+          uncovered_bin_info info;
+          info.name = ss.str();
+          info.index = std::numeric_limits<size_t>::max();
+          info.cross_product = product;
+          info.hits = hits;
+          info.at_least = at_least;
+          info.is_cross = true;
+          info.is_auto = true;
+          info.is_transition = false;
+          out.push_back(std::move(info));
+        } while (next_product(product, sizes));
+      }
+    }
+
+    for (size_t i = 0; i < crs_data->user_bins.size(); ++i) {
+      const auto& ub = crs_data->user_bins[i];
+      if (ub.bin_type != default_ || ub.size == 0) continue;
+      if (ub.hits >= at_least) continue;
+      uncovered_bin_info info;
+      info.name = ub.name;
+      info.index = i;
+      info.hits = ub.hits;
+      info.at_least = at_least;
+      info.is_cross = true;
+      info.is_auto = false;
+      info.is_transition = false;
+      out.push_back(std::move(info));
+    }
+
+    return out;
+  }
+
+  std::vector<std::string> get_uncovered_bins() const override
+  {
+    auto infos = get_uncovered_bin_infos();
+    std::vector<std::string> names;
+    names.reserve(infos.size());
+    for (const auto& info : infos) {
+      names.push_back(info.name);
+    }
+    return names;
+  }
+
+  CrossQueueType get_uncovered_cross_tuples(
+      uint64_t max_tuples = cross_with_max_tuples,
+      bool* truncated = nullptr) const
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    if (truncated != nullptr) *truncated = false;
+    CrossQueueType out;
+
+    crs_data->sync_options_from_parent();
+    ensure_bins();
+
+    const unsigned int at_least = crs_data->option.at_least;
+    if (at_least == 0 || cvps_vec.empty())
+      return out;
+
+    std::set<CrossValType, detail::cross_tuple_less<Args...>> seen;
+    bool hit_limit = false;
+
+    auto try_add_tuple = [&](const CrossValType& tup) -> bool {
+      if (seen.count(tup) > 0)
+        return true;
+      if (out.size() >= max_tuples) {
+        hit_limit = true;
+        if (truncated != nullptr) *truncated = true;
+        return false;
+      }
+      seen.insert(tup);
+      out.push_back(tup);
+      return true;
+    };
+
+    std::vector<size_t> sizes;
+    bool all_nonempty = true;
+    for (auto* cvp : cvps_vec) {
+      const size_t sz = static_cast<size_t>(cvp->size());
+      sizes.push_back(sz);
+      if (sz == 0) all_nonempty = false;
+    }
+    if (!all_nonempty)
+      return out;
+
+    const uint64_t enum_cap = std::max<uint64_t>(max_tuples, cross_with_max_tuples);
+
+    // 1. Uncovered user-defined cross bins
+    for (size_t i = 0; i < crs_data->user_bins.size() && !hit_limit; ++i) {
+      const auto& ub = crs_data->user_bins[i];
+      if (ub.bin_type != default_ || ub.size == 0 || ub.hits >= at_least)
+        continue;
+
+      const cross_select_node* qnode = ub.select ? ub.select->get_underlying_queue_node() : nullptr;
+      if (qnode != nullptr && qnode->queue_for_each_tuple) {
+        const void* last_checked_ptr = nullptr;
+        bool last_checked_ok = false;
+        qnode->queue_for_each_tuple(
+            cvps_vec,
+            [&](const std::vector<size_t>& prod,
+                const void* tup_ptr,
+                const void* const* elem_ptrs) -> bool {
+              const auto* tup = static_cast<const CrossValType*>(tup_ptr);
+              if (tup_ptr != last_checked_ptr) {
+                last_checked_ptr = tup_ptr;
+                std::array<const void*, sizeof...(Args)> ep{};
+                std::vector<std::vector<size_t>> dims;
+                last_checked_ok = is_tuple_valid_base(*tup, ep, dims);
+              }
+              if (!last_checked_ok)
+                return true;
+              if (ub.select && !ub.select->matches_tuple(prod, tup_ptr, elem_ptrs))
+                return true;
+              if (is_product_excluded(prod, *tup, elem_ptrs))
+                return true;
+              return try_add_tuple(*tup);
+            });
+      } else {
+        std::vector<size_t> product(sizes.size(), 0);
+        std::vector<CrossValType> prod_tuples;
+        std::array<const void*, sizeof...(Args)> elem_ptrs{};
+        std::vector<std::vector<size_t>> dims;
+        do {
+          if (ub.select && !ub.select->may_match(product))
+            continue;
+          if (!try_enumerate_product(product, enum_cap, prod_tuples)) {
+            if (truncated != nullptr) *truncated = true;
+            continue;
+          }
+          for (const auto& tup : prod_tuples) {
+            if (!is_tuple_valid_base(tup, elem_ptrs, dims))
+              continue;
+            if (ub.select && !ub.select->matches_tuple(product, &tup, elem_ptrs.data()))
+              continue;
+            if (is_product_excluded(product, tup, elem_ptrs.data()))
+              continue;
+            if (!try_add_tuple(tup))
+              break;
+          }
+          if (hit_limit) break;
+        } while (next_product(product, sizes));
+      }
+    }
+
+    // 2. Uncovered auto cross bins
+    if (!hit_limit && !crs_data->has_default_bin()) {
+      const auto& hit_map = crs_data->get_cross_bins();
+      std::vector<size_t> product(sizes.size(), 0);
+      std::vector<CrossValType> prod_tuples;
+      std::array<const void*, sizeof...(Args)> elem_ptrs{};
+      std::vector<std::vector<size_t>> dims;
+      do {
+        if (crs_data->has_custom_auto_bins() && !crs_data->is_auto_bin(product))
+          continue;
+        auto hit_it = hit_map.find(product);
+        const uint64_t hits = (hit_it != hit_map.end()) ? hit_it->second : 0;
+        if (hits >= at_least)
+          continue;
+        if (!try_enumerate_product(product, enum_cap, prod_tuples)) {
+          if (truncated != nullptr) *truncated = true;
+          continue;
+        }
+        for (const auto& tup : prod_tuples) {
+          if (!is_tuple_valid_base(tup, elem_ptrs, dims))
+            continue;
+          bool in_any_user_bin = false;
+          for (const auto& ub : crs_data->user_bins) {
+            if (ub.bin_type == default_bin_ || !ub.select) continue;
+            if (ub.select->matches_tuple(product, &tup, elem_ptrs.data())) {
+              in_any_user_bin = true;
+              break;
+            }
+          }
+          if (in_any_user_bin)
+            continue;
+          if (!try_add_tuple(tup))
+            break;
+        }
+        if (hit_limit) break;
+      } while (next_product(product, sizes));
+    }
+
+    std::sort(out.begin(), out.end(), detail::cross_tuple_less<Args...>());
+    return out;
+  }
+
+  std::vector<std::vector<std::string>> get_uncovered_cross_tuples_str(
+      uint64_t max_tuples = 65536,
+      bool* truncated = nullptr) const override
+  {
+    auto tuples = get_uncovered_cross_tuples(max_tuples, truncated);
+    std::vector<std::vector<std::string>> out;
+    out.reserve(tuples.size());
+    for (const auto& tup : tuples) {
+      std::vector<std::string> row;
+      row.reserve(sizeof...(Args));
+      tuple_to_strings_impl<0>(tup, row);
+      out.push_back(std::move(row));
+    }
+    return out;
   }
 
 };

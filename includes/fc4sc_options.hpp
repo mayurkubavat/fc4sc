@@ -274,6 +274,9 @@ struct cvg_type_option // covergroup type_option declaration
   /*! Whether bin_array distributes values before applying .with() filtering */
   bool distribute_first;
 
+  /*! Whether sample() defers sampling to the end of the timestep (IEEE 1800-2023 19.7.1) */
+  bool strobe;
+
   /*!
    * \brief Sets all values to default
    */
@@ -284,6 +287,7 @@ struct cvg_type_option // covergroup type_option declaration
     this->merge_instances = 0;
     this->strict_sv_options = 0;
     this->distribute_first = false;
+    this->strobe = false;
   }
 };
 

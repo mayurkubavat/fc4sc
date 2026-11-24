@@ -226,6 +226,41 @@ inline std::shared_ptr<cross_select_node> build_cross_queue_node(
     }
     return count;
   };
+  node->queue_for_each_tuple = [sorted_q](
+      const std::vector<cvp_base*>& cvps,
+      const std::function<bool(const std::vector<size_t>&, const void*, const void* const*)>& visitor) -> void {
+    if (!visitor) return;
+    if (cvps.size() != sizeof...(Args))
+      throw std::invalid_argument("CrossQueueType arity does not match cross coverpoints");
+    std::array<const void*, sizeof...(Args)> elem_ptrs{};
+    for (const auto& t : sorted_q) {
+      std::vector<std::vector<size_t>> dims(sizeof...(Args));
+      cross_tuple_cmp_impl<0, sizeof...(Args), tuple_t>::matching_bins(t, cvps, dims);
+      bool ok = true;
+      for (const auto& d : dims) {
+        if (d.empty()) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+      cross_tuple_cmp_impl<0, sizeof...(Args), tuple_t>::fill_elem_ptrs(t, elem_ptrs.data());
+      std::vector<size_t> pos(dims.size(), 0);
+      while (true) {
+        std::vector<size_t> prod(dims.size());
+        for (size_t k = 0; k < dims.size(); ++k)
+          prod[k] = dims[k][pos[k]];
+        if (!visitor(prod, &t, elem_ptrs.data()))
+          return;
+        size_t p = dims.size();
+        while (p > 0 && ++pos[p - 1] == dims[p - 1].size()) {
+          pos[p - 1] = 0;
+          --p;
+        }
+        if (p == 0) break;
+      }
+    }
+  };
   return node;
 }
 

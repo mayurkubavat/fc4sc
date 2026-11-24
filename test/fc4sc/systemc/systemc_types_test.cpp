@@ -287,6 +287,47 @@ TEST(systemc_types, cross_with_and_queue) {
   fc4sc::global::delete_context(cntxt);
 }
 
+TEST(systemc_types, sc_lv_prev_and_0X_prefix_safety) {
+  typedef fc4sc_type_traits<sc_dt::sc_lv<4>> lv4_traits;
+  typedef fc4sc_type_traits<sc_dt::sc_lv<3>> lv3_traits;
+
+  // prev() on 4-state boundary must skip all intermediate 2-state values (never return is_01())
+  const sc_dt::sc_lv<4> v_000X("0b000X");
+  const sc_dt::sc_lv<4> v_001Z("0b001Z");
+  EXPECT_EQ(lv4_traits::next(v_000X), v_001Z);
+  EXPECT_EQ(lv4_traits::prev(v_001Z), v_000X);
+  EXPECT_FALSE(lv4_traits::prev(v_001Z).is_01());
+
+  const sc_dt::sc_lv<4> v_010Z("0b010Z");
+  const sc_dt::sc_lv<4> v_00XX("0b00XX");
+  EXPECT_EQ(lv4_traits::next(v_00XX), v_010Z);
+  EXPECT_EQ(lv4_traits::prev(v_010Z), v_00XX);
+
+  const sc_dt::sc_lv<4> v_000Z("0b000Z");
+  EXPECT_EQ(lv4_traits::prev(v_000Z), sc_dt::sc_lv<4>("0b1111"));
+
+  // half_open_interval(00X, 01Z) must yield [00X, 00X] (lo <= hi, 4-state)
+  const auto ho = fc4sc::half_open_interval(sc_dt::sc_lv<3>("0b00X"), sc_dt::sc_lv<3>("0b01Z"));
+  EXPECT_EQ(ho.first, sc_dt::sc_lv<3>("0b00X"));
+  EXPECT_EQ(ho.second, sc_dt::sc_lv<3>("0b00X"));
+
+  // "0X*" bit patterns must never be misparsed as hex or trigger E202
+  const sc_dt::sc_lv<3> v_0X0("0b0X0");
+  const sc_dt::sc_lv<3> v_0X1("0b0X1");
+  const sc_dt::sc_lv<3> v_0XZ("0b0XZ");
+  EXPECT_EQ(lv3_traits::next(v_0X0), v_0X1);
+  EXPECT_EQ(lv3_traits::prev(v_0X1), v_0X0);
+  EXPECT_EQ(lv3_traits::next(v_0X1), v_0XZ);
+  EXPECT_EQ(lv3_traits::prev(v_0XZ), v_0X1);
+
+  for (const sc_dt::sc_lv<3>& sample : {v_0X0, v_0X1, v_0XZ}) {
+    const std::string enc = lv3_traits::to_ucis_integer(sample);
+    sc_dt::sc_lv<3> dec("0b000");
+    ASSERT_TRUE(lv3_traits::from_ucis_integer(enc, dec));
+    EXPECT_EQ(dec, sample);
+  }
+}
+
 int sc_main(int ac, char* av[]) {
   testing::InitGoogleTest(&ac, av);
   return RUN_ALL_TESTS();

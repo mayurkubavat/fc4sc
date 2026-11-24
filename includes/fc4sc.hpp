@@ -87,5 +87,6 @@ using fc4sc::fc4sc_enum_traits;
 using fc4sc::half_open_interval;
 using fc4sc::tolerance;
 using fc4sc::percent_tolerance;
+using fc4sc::uncovered_bin_info;
 
 #endif /* FC4SC_HPP */

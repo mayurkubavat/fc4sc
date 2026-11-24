@@ -516,6 +516,33 @@ class bin_base_data_model;
 class global;
 class cvg_metadata;
 class scp_metadata;
+
+struct uncovered_bin_info {
+  std::string name;
+  size_t index = 0;
+  std::vector<size_t> cross_product;
+  uint64_t hits = 0;
+  unsigned int at_least = 1;
+  bool is_cross = false;
+  bool is_auto = false;
+  bool is_transition = false;
+};
+
+namespace detail {
+
+class strobe_backend {
+public:
+  virtual ~strobe_backend() {}
+  virtual void schedule(covergroup* cg) = 0;
+  virtual void cancel(covergroup* cg) = 0;
+};
+
+inline strobe_backend*& active_strobe_backend() {
+  static strobe_backend* backend = nullptr;
+  return backend;
+}
+
+} // namespace detail
 /*!
  *  \brief Alias to std::make_pair
  *  \param t1 One end of the interval
@@ -661,6 +688,12 @@ public:
     return false;
   }
 
+  /*! Whether this is a transition bin */
+  virtual bool is_transition_bin() const
+  {
+    return false;
+  }
+
   /*!
    * Adds hits to a value of a default bin array, the value written in
    * decimal. Returns false if this is not a default bin array, or if the
@@ -726,11 +759,20 @@ public:
   /*! Get reference to bin name */
   virtual std::string& name() = 0;
 
+  /*! Get const reference to bin name */
+  virtual const std::string& name() const = 0;
+
   /*! Get reference to bin type */
   virtual bin_t& bin_type() = 0;
 
+  /*! Get const reference to bin type */
+  virtual const bin_t& bin_type() const = 0;
+
   /*! Get reference to bin counts */
   virtual std::vector<uint64_t>& interval_hits() = 0;
+
+  /*! Get const reference to bin counts */
+  virtual const std::vector<uint64_t>& interval_hits() const = 0;
 
   /*! Destructor */
   virtual ~bin_base(){}
@@ -765,6 +807,9 @@ public:
 
   /*! Get reference to coverage object name */
   virtual std::string& name() = 0;
+
+  /*! Get const reference to coverage object name */
+  virtual const std::string& name() const = 0;
 
   /** \name Coverage API
    *  API for getting and controlling coverage collection at run time
@@ -902,6 +947,9 @@ public:
   /*! Get pointer to data model */
   virtual cvp_base_data_model* get_data() = 0;
 
+  /*! Get const pointer to data model */
+  virtual const cvp_base_data_model* get_data() const = 0;
+
   /*!
    * \brief Returns the type options of this coverpoint or cross, shared by
    * all the instances of its covergroup type, see \link cvp_type_option
@@ -911,6 +959,15 @@ public:
   {
     return get_data()->type_option();
   }
+
+  /*! Const overload of type_option() */
+  const cvp_type_option& type_option() const;
+
+  /*! Get names of uncovered bins (hits < option.at_least, excluding ignore/illegal/default) */
+  virtual std::vector<std::string> get_uncovered_bins() const = 0;
+
+  /*! Get structured metadata for uncovered bins */
+  virtual std::vector<uncovered_bin_info> get_uncovered_bin_infos() const = 0;
 
   /*!
    * \brief Returns the type coverage of this coverpoint or cross: its
@@ -1005,23 +1062,47 @@ public:
   /*! Get reference to coverpoint options */
   virtual cvp_option& option() = 0;
 
+  /*! Get const reference to coverpoint options */
+  virtual const cvp_option& option() const = 0;
+
   /*! Get reference to sample_expression string */
   virtual std::string& get_sample_expression_str() = 0;
 
   /*! Get vector of regular bins associated with this coverpoint */
   virtual std::vector<bin_base*> get_bins_base() = 0;
 
+  /*! Get const vector of regular bins associated with this coverpoint */
+  virtual std::vector<const bin_base*> get_bins_base() const = 0;
+
   /*! Get vector of illegal bins associated with this coverpoint */
   virtual std::vector<bin_base*> get_illegal_bins_base() = 0;
 
+  /*! Get const vector of illegal bins associated with this coverpoint */
+  virtual std::vector<const bin_base*> get_illegal_bins_base() const = 0;
+
   /*! Get vector of ignore bins associated with this coverpoint */
   virtual std::vector<bin_base*> get_ignore_bins_base() = 0;
+
+  /*! Get const vector of ignore bins associated with this coverpoint */
+  virtual std::vector<const bin_base*> get_ignore_bins_base() const = 0;
 
   /*! Get vector of default bins associated with this coverpoint */
   virtual std::vector<bin_base*> get_default_bins_base()
   {
     return std::vector<bin_base*>();
   }
+
+  /*! Get const vector of default bins associated with this coverpoint */
+  virtual std::vector<const bin_base*> get_default_bins_base() const
+  {
+    return std::vector<const bin_base*>();
+  }
+
+  /*! Get uncovered intervals formatted as strings */
+  virtual std::vector<interval_t<std::string>> get_uncovered_intervals_str() const = 0;
+
+  /*! Get uncovered intervals converted to int (truncated if wider than int) */
+  virtual std::vector<interval_t<int>> get_uncovered_intervals_to_int() const = 0;
 
   /*! Destructor */
   virtual ~coverpoint_base() { }
@@ -1084,6 +1165,11 @@ public:
       const std::vector<cvp_base*>&,
       const std::function<bool(const std::vector<size_t>&, const void*, const void* const*)>&)> queue_count_tuples;
 
+  /*! Visits finite CrossQueueType tuples (stops early when visitor returns false) */
+  std::function<void(
+      const std::vector<cvp_base*>&,
+      const std::function<bool(const std::vector<size_t>&, const void*, const void* const*)>&)> queue_for_each_tuple;
+
   /*! Sorted unique bin-index products reachable by queue_, once resolved */
   std::vector<std::vector<size_t>> queue_products;
 
@@ -1137,6 +1223,45 @@ public:
       case and_: return lhs->matches(product) && rhs->matches(product);
       case or_: return lhs->matches(product) || rhs->matches(product);
       case with_: return lhs ? lhs->matches(product) : true;
+      case queue_:
+        return std::binary_search(queue_products.begin(), queue_products.end(), product);
+      default:
+        return position < product.size() && product[position] < bins.size() &&
+               bins[product[position]];
+    }
+  }
+
+  /*!
+   * \brief Sound under-approximation: true only if every tuple in \p product matches
+   */
+  bool must_match(const std::vector<size_t>& product) const
+  {
+    switch (op)
+    {
+      case all_: return true;
+      case not_: return lhs ? !lhs->may_match(product) : false;
+      case and_: return lhs && rhs && lhs->must_match(product) && rhs->must_match(product);
+      case or_: return (lhs && lhs->must_match(product)) || (rhs && rhs->must_match(product));
+      case with_: return false;
+      case queue_: return false;
+      default:
+        return position < product.size() && product[position] < bins.size() &&
+               bins[product[position]];
+    }
+  }
+
+  /*!
+   * \brief Sound over-approximation: true if any tuple in \p product may match
+   */
+  bool may_match(const std::vector<size_t>& product) const
+  {
+    switch (op)
+    {
+      case all_: return true;
+      case not_: return lhs ? !lhs->must_match(product) : false;
+      case and_: return lhs && rhs && lhs->may_match(product) && rhs->may_match(product);
+      case or_: return (lhs && lhs->may_match(product)) || (rhs && rhs->may_match(product));
+      case with_: return lhs ? lhs->may_match(product) : true;
       case queue_:
         return std::binary_search(queue_products.begin(), queue_products.end(), product);
       default:
@@ -1442,11 +1567,19 @@ public:
   /*! Get reference to cross options */
   virtual cross_option& option() = 0;
 
+  /*! Get const reference to cross options */
+  virtual const cross_option& option() const = 0;
+
   /*! Get cross bins storage */
   virtual const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const = 0;
 
   /*! Get crossed coverpoints storage */
   virtual const std::vector<cvp_base *>& get_cross_coverpoints() const = 0;
+
+  /*! Get uncovered cross tuples formatted as string vectors */
+  virtual std::vector<std::vector<std::string>> get_uncovered_cross_tuples_str(
+      uint64_t max_tuples = 65536,
+      bool* truncated = nullptr) const = 0;
 
   /*! Destructor */
   virtual ~cross_base() { }
@@ -1552,8 +1685,23 @@ public:
     throw("No coverpoint " + name + " in " + this->name());
   }
 
+  /*! get const coverpoint reference by name within this covergroup*/
+  const cvp_base& get_coverpoint(const std::string& name) const
+  {
+    for (const auto* cvp : cvps)
+    {
+      if (name == cvp->name()) {
+        return *cvp;
+      }
+    }
+    throw("No coverpoint " + name + " in " + this->name());
+  }
+
   /*! Get pointer to covergroup data */
   virtual cvg_base_data_model* get_cvg_data() = 0;
+
+  /*! Get const pointer to covergroup data */
+  virtual const cvg_base_data_model* get_cvg_data() const = 0;
 
   /*! Indictor if covergorup is enabled */
   virtual bool is_enabled() const = 0;
@@ -1590,8 +1738,14 @@ public:
   /*! Type specific options */
   virtual cvg_type_option& type_option() = 0;
 
+  /*! Const type specific options */
+  virtual const cvg_type_option& type_option() const = 0;
+
   /*! Name of the covergroup type */
   virtual std::string& type_name() = 0; 
+
+  /*! Const name of the covergroup type */
+  virtual const std::string& type_name() const = 0; 
 
   /*! File ID associated with where this type is declared */
   virtual unsigned int& file_id() = 0;
@@ -1862,6 +2016,18 @@ inline cvp_type_option& cvp_base_data_model::type_option()
     return own_type_option;
   parent_cvg->type_data->sync_cvp_type_option(name);
   return parent_cvg->type_data->cvp_type_options[name];
+}
+
+inline const cvp_type_option& cvp_base::type_option() const
+{
+  const cvp_base_data_model* d = get_data();
+  if (d != nullptr && d->parent_cvg != nullptr && d->parent_cvg->type_data != nullptr) {
+    auto it = d->parent_cvg->type_data->cvp_type_options.find(d->name);
+    if (it != d->parent_cvg->type_data->cvp_type_options.end())
+      return it->second;
+  }
+  static const cvp_type_option default_opt;
+  return (d != nullptr) ? d->own_type_option : default_opt;
 }
 
 inline void coverpoint_base_data_model::sync_options_from_parent()

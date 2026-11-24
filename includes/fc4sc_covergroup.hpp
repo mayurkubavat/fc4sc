@@ -206,11 +206,15 @@ protected:
   covergroup &operator=(covergroup &&other) = delete;
 
   /*! Destructor */
-  virtual ~covergroup() { }
+  virtual ~covergroup() {
+    if (detail::strobe_backend* backend = detail::active_strobe_backend()) {
+      backend->cancel(this);
+    }
+  }
 
 public:
 
-  virtual void sample() {
+  void sample_immediate() {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
@@ -242,6 +246,40 @@ public:
 #endif
       }
     }
+  }
+
+  virtual void sample() override {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    cvg_data->sync_options();
+    if (!this->is_enabled()) {
+      std::cerr << "Warning: attempted to sample a disabled covergroup\n";
+      return;
+    }
+    if (!cvg_data->collect) {
+      for (auto& cvp : this->cvps) {
+        cvp->on_stopped_sample();
+      }
+      return;
+    }
+    if (cvg_data->type_data != nullptr && cvg_data->type_data->type_option.strobe) {
+      detail::strobe_backend* backend = detail::active_strobe_backend();
+      if (backend == nullptr) {
+#ifndef FC4SC_NO_THROW
+        throw std::logic_error(
+            "covergroup::sample: type_option.strobe is true, but no strobe backend is registered (include fc4sc_systemc.hpp)");
+#else
+        std::cerr << "Warning: covergroup::sample: type_option.strobe is true without a registered strobe backend; sampling immediately\n";
+        sample_immediate();
+        return;
+#endif
+      }
+      backend->schedule(this);
+      return;
+    }
+    sample_immediate();
   }
 
   void set_iff(std::function<bool()> pred, const std::string& expr_str = "")
@@ -553,7 +591,7 @@ public:
     return cvg_data->collect;
   }
 
-  cvg_base_data_model* get_cvg_data()
+  cvg_base_data_model* get_cvg_data() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -562,7 +600,25 @@ public:
     return cvg_data;
   }
 
-  std::string& name() 
+  const cvg_base_data_model* get_cvg_data() const override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return cvg_data;
+  }
+
+  std::string& name() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return cvg_data->name;
+  }
+
+  const std::string& name() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -620,7 +676,7 @@ public:
     return cvg_data->option;
   }
 
-  cvg_type_option& type_option()
+  cvg_type_option& type_option() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -629,7 +685,25 @@ public:
     return cvg_data->type_data->type_option;
   }
 
-  std::string& type_name()
+  const cvg_type_option& type_option() const override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return cvg_data->type_data->type_option;
+  }
+
+  std::string& type_name() override
+  {
+    if(valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    return cvg_data->type_data->type_name;
+  }
+
+  const std::string& type_name() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -683,13 +757,121 @@ public:
     return cvg_data->inst_line;
   }
 
-  bool is_enabled() const
+  bool is_enabled() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
     return cvg_data->enable;
+  }
+
+  template <typename T>
+  std::vector<interval_t<T>> get_uncovered_intervals(const std::string& cvp_name) const
+  {
+    const cvp_base& base = this->get_coverpoint(cvp_name);
+    const auto* typed = dynamic_cast<const coverpoint<T>*>(&base);
+    if (typed == nullptr) {
+      throw std::invalid_argument("covergroup::get_uncovered_intervals: type mismatch for coverpoint " + cvp_name);
+    }
+    return typed->get_uncovered_intervals();
+  }
+
+  template <typename T>
+  std::vector<interval_t<T>> get_uncovered_intervals(const coverpoint<T>& cvp) const
+  {
+    return cvp.get_uncovered_intervals();
+  }
+
+  std::map<std::string, std::vector<interval_t<std::string>>> get_uncovered_intervals() const
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    std::map<std::string, std::vector<interval_t<std::string>>> out;
+    for (const auto* cvp : cvps) {
+      const auto* cbase = dynamic_cast<const coverpoint_base*>(cvp);
+      if (cbase != nullptr) {
+        out[cvp->name()] = cbase->get_uncovered_intervals_str();
+      }
+    }
+    return out;
+  }
+
+  std::vector<std::string> get_uncovered_bins(const std::string& cvp_or_cross_name) const
+  {
+    return this->get_coverpoint(cvp_or_cross_name).get_uncovered_bins();
+  }
+
+  std::map<std::string, std::vector<std::string>> get_uncovered_bins() const
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    std::map<std::string, std::vector<std::string>> out;
+    for (const auto* cvp : cvps) {
+      out[cvp->name()] = cvp->get_uncovered_bins();
+    }
+    return out;
+  }
+
+  std::map<std::string, std::vector<uncovered_bin_info>> get_uncovered_bin_infos() const
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    std::map<std::string, std::vector<uncovered_bin_info>> out;
+    for (const auto* cvp : cvps) {
+      out[cvp->name()] = cvp->get_uncovered_bin_infos();
+    }
+    return out;
+  }
+
+  template <typename... Args>
+  CrossQueueType<Args...> get_uncovered_cross_tuples(
+      const std::string& cross_name,
+      uint64_t max_tuples = cross_with_max_tuples,
+      bool* truncated = nullptr) const
+  {
+    const cvp_base& base = this->get_coverpoint(cross_name);
+    const auto* crs = dynamic_cast<const cross<Args...>*>(&base);
+    if (crs == nullptr) {
+      throw std::invalid_argument("covergroup::get_uncovered_cross_tuples: type mismatch for cross " + cross_name);
+    }
+    return crs->get_uncovered_cross_tuples(max_tuples, truncated);
+  }
+
+  template <typename... Args>
+  CrossQueueType<Args...> get_uncovered_cross_tuples(
+      const cross<Args...>& crs,
+      uint64_t max_tuples = cross_with_max_tuples,
+      bool* truncated = nullptr) const
+  {
+    return crs.get_uncovered_cross_tuples(max_tuples, truncated);
+  }
+
+  std::map<std::string, std::vector<std::vector<std::string>>> get_uncovered_cross_tuples(
+      uint64_t max_tuples = 65536,
+      bool* truncated = nullptr) const
+  {
+    if (valid_data.use_count() == 0) {
+      std::cerr << "Error: coverage data has been deleted\n";
+      throw("Error: coverage data has been deleted");
+    }
+    if (truncated != nullptr) *truncated = false;
+    std::map<std::string, std::vector<std::vector<std::string>>> out;
+    for (const auto* cvp : cvps) {
+      const auto* crs = dynamic_cast<const cross_base*>(cvp);
+      if (crs != nullptr) {
+        bool local_trunc = false;
+        out[cvp->name()] = crs->get_uncovered_cross_tuples_str(max_tuples, &local_trunc);
+        if (local_trunc && truncated != nullptr) *truncated = true;
+      }
+    }
+    return out;
   }
 
 };
@@ -729,17 +911,21 @@ public:
   cvg_type_option host_type_opt;
 
   cvg_base_data_model* get_cvg_data() override { return &dummy_data_; }
+  const cvg_base_data_model* get_cvg_data() const override { return &dummy_data_; }
   bool is_enabled() const override { return true; }
   void disable_cvg() override {}
   cvp_metadata_t get_strings(cvp_base*) override { return cvp_metadata_t(); }
   cvg_option& option() const override { return const_cast<cvg_option&>(host_opt); }
   cvg_type_option& type_option() override { return host_type_opt; }
+  const cvg_type_option& type_option() const override { return host_type_opt; }
   std::string& type_name() override { return host_type; }
+  const std::string& type_name() const override { return host_type; }
   unsigned int& file_id() override { return host_fid; }
   uint32_t& line() override { return host_line; }
   unsigned int& inst_file_id() override { return host_fid; }
   uint32_t& inst_line() override { return host_line; }
   std::string& name() override { return host_name; }
+  const std::string& name() const override { return host_name; }
   double get_inst_coverage() const override { return 0; }
   double get_inst_coverage(int& h, int& t) const override { h = 0; t = 0; return 0; }
   void start() override {}

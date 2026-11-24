@@ -47,6 +47,18 @@ namespace fc4sc {
 template <typename T>
 using interval_t = std::pair<T, T>;
 
+template <typename T>
+struct fc4sc_interval_merge_traits {
+  static bool can_merge_adjacent(const T&, const T&) { return true; }
+};
+
+template <int W>
+struct fc4sc_interval_merge_traits<sc_dt::sc_lv<W>> {
+  static bool can_merge_adjacent(const sc_dt::sc_lv<W>& lo, const sc_dt::sc_lv<W>& hi) {
+    return lo.is_01() && hi.is_01();
+  }
+};
+
 namespace detail {
 template <typename T>
 using decay_t = typename std::decay<T>::type;
@@ -1844,9 +1856,9 @@ struct fc4sc_type_traits<sc_dt::sc_lv<W>> {
     return less_equal(lo, hi) ? interval_t<T>(lo, hi) : interval_t<T>(hi, lo);
   }
 
-  static T min_value() { return T(std::string(static_cast<size_t>(W), '0').c_str()); }
-  static T max_value() { return T(std::string(static_cast<size_t>(W), 'X').c_str()); }
-  static T max_01_value() { return T(std::string(static_cast<size_t>(W), '1').c_str()); }
+  static T min_value() { return T(("0b" + std::string(static_cast<size_t>(W), '0')).c_str()); }
+  static T max_value() { return T(("0b" + std::string(static_cast<size_t>(W), 'X')).c_str()); }
+  static T max_01_value() { return T(("0b" + std::string(static_cast<size_t>(W), '1')).c_str()); }
 
   static bool str_is_01(const std::string& s) {
     for (char c : s) {
@@ -1867,10 +1879,10 @@ struct fc4sc_type_traits<sc_dt::sc_lv<W>> {
         }
         s[i - 1] = '0';
       }
-      if (!wrapped) return T(s.c_str());
+      if (!wrapped) return T(("0b" + s).c_str());
       std::string first_xz(static_cast<size_t>(W), '0');
       first_xz.back() = 'Z';
-      return T(first_xz.c_str());
+      return T(("0b" + first_xz).c_str());
     }
     // Increment base-4 (0 < 1 < Z < X), skipping any pure-01 value
     auto inc_base4 = [&]() {
@@ -1884,7 +1896,7 @@ struct fc4sc_type_traits<sc_dt::sc_lv<W>> {
     };
     inc_base4();
     if (str_is_01(s)) s.back() = 'Z';
-    return T(s.c_str());
+    return T(("0b" + s).c_str());
   }
 
   static T prev(const T& v) {
@@ -1897,7 +1909,7 @@ struct fc4sc_type_traits<sc_dt::sc_lv<W>> {
         }
         s[i - 1] = '1';
       }
-      return T(s.c_str());
+      return T(("0b" + s).c_str());
     }
     std::string first_xz(static_cast<size_t>(W), '0');
     first_xz.back() = 'Z';
@@ -1914,8 +1926,8 @@ struct fc4sc_type_traits<sc_dt::sc_lv<W>> {
       }
     };
     dec_base4();
-    if (str_is_01(s)) dec_base4();
-    return T(s.c_str());
+    while (str_is_01(s)) dec_base4();
+    return T(("0b" + s).c_str());
   }
 
   static void auto_bin_bounds(T& lo, T& hi) {
@@ -1930,7 +1942,7 @@ struct fc4sc_type_traits<sc_dt::sc_lv<W>> {
     return detail::big_uint::from_bits(v.to_string());
   }
   static T from_01_big_uint(const detail::big_uint& b) {
-    return T(b.to_bits(static_cast<size_t>(W)).c_str());
+    return T(("0b" + b.to_bits(static_cast<size_t>(W))).c_str());
   }
 
   static bool try_distance_u64(const T& lo, const T& hi, uint64_t& out) {
@@ -2056,7 +2068,7 @@ struct fc4sc_type_traits<sc_dt::sc_lv<W>> {
       b = std::move(q);
     }
     if (!b.is_zero() || str_is_01(str)) return false;
-    out = T(str.c_str());
+    out = T(("0b" + str).c_str());
     return true;
   }
 
