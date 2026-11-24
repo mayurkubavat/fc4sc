@@ -676,9 +676,9 @@ public:
 
   ~dynamic_covergroup()
   {
-    for (auto cvp : cvps)
+    for (size_t i = cvps.size(); i > 0; --i)
     {
-      delete cvp;
+      delete cvps[i - 1];
     }
   }
 

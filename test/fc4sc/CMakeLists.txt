@@ -59,3 +59,13 @@ target_link_libraries(fc4sc_no_throw_tests PRIVATE FC4SC::fc4sc GTest::gtest)
 gtest_discover_tests(fc4sc_no_throw_tests
   TEST_PREFIX no_throw.
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+find_package(SystemCLanguage CONFIG QUIET)
+if(TARGET SystemC::systemc)
+  add_executable(fc4sc_systemc_tests
+    systemc/systemc_types_test.cpp
+    systemc/systemc_types_order2_test.cpp)
+  target_link_libraries(fc4sc_systemc_tests PRIVATE FC4SC::fc4sc SystemC::systemc GTest::gtest)
+  gtest_discover_tests(fc4sc_systemc_tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+endif()

@@ -38,13 +38,13 @@ key="3"
 alias="string" 
 excluded="false" 
 >
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
 <ucis:cgId cgName="output_coverage_1" moduleName="INST_PARENT_MODULE">
 <ucis:cginstSourceId file="1" line="1" inlineCount="1"/>
 <ucis:cgSourceId file="src/display.h" line="76" inlineCount="1"/>
 </ucis:cgId>
 <ucis:coverpoint name="data_ready_cvp" key="KEY" exprString="value">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="zero" 
 type="default" alias="0">
 <ucis:range 
@@ -88,7 +88,7 @@ to ="0"
 </ucis:coverpoint>
 
 <ucis:coverpoint name="output_valid_cvp" key="KEY" exprString="valid">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="valid" 
 type="default" alias="24">
 <ucis:range 
@@ -129,13 +129,13 @@ key="6"
 alias="string" 
 excluded="false" 
 >
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
 <ucis:cgId cgName="stimulus_coverage_1" moduleName="INST_PARENT_MODULE">
 <ucis:cginstSourceId file="1" line="1" inlineCount="1"/>
 <ucis:cgSourceId file="src/stimulus.h" line="77" inlineCount="1"/>
 </ucis:cgId>
 <ucis:coverpoint name="values_cvp" key="KEY" exprString="value">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="zero" 
 type="default" alias="20">
 <ucis:range 
@@ -189,7 +189,7 @@ to ="5"
 </ucis:coverpoint>
 
 <ucis:coverpoint name="reset_cvp" key="KEY" exprString="reset">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="active" 
 type="default" alias="3">
 <ucis:range 
@@ -213,7 +213,7 @@ to ="0"
 </ucis:coverpoint>
 
 <ucis:coverpoint name="input_valid_cvp" key="KEY" exprString="valid">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="valid" 
 type="default" alias="24">
 <ucis:range 
@@ -237,7 +237,7 @@ to ="0"
 </ucis:coverpoint>
 
 <ucis:cross name="reset valid" key="KEY" >
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:crossExpr>reset_cvp</ucis:crossExpr> 
 <ucis:crossExpr>input_valid_cvp</ucis:crossExpr> 
 <ucis:crossExpr>values_cvp</ucis:crossExpr> 
@@ -361,13 +361,13 @@ key="7"
 alias="string" 
 excluded="false" 
 >
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
 <ucis:cgId cgName="stimulus_coverage_2" moduleName="INST_PARENT_MODULE">
 <ucis:cginstSourceId file="1" line="1" inlineCount="1"/>
 <ucis:cgSourceId file="src/stimulus.h" line="77" inlineCount="1"/>
 </ucis:cgId>
 <ucis:coverpoint name="values_cvp" key="KEY" exprString="value">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="zero" 
 type="default" alias="0">
 <ucis:range 
@@ -421,7 +421,7 @@ to ="5"
 </ucis:coverpoint>
 
 <ucis:coverpoint name="reset_cvp" key="KEY" exprString="reset">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="active" 
 type="default" alias="0">
 <ucis:range 
@@ -445,7 +445,7 @@ to ="0"
 </ucis:coverpoint>
 
 <ucis:coverpoint name="input_valid_cvp" key="KEY" exprString="valid">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="valid" 
 type="default" alias="0">
 <ucis:range 
@@ -469,7 +469,7 @@ to ="0"
 </ucis:coverpoint>
 
 <ucis:cross name="reset valid" key="KEY" >
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:crossExpr>reset_cvp</ucis:crossExpr> 
 <ucis:crossExpr>input_valid_cvp</ucis:crossExpr> 
 <ucis:crossExpr>values_cvp</ucis:crossExpr> 
@@ -496,13 +496,13 @@ key="10"
 alias="string" 
 excluded="false" 
 >
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" cross_num_print_missing="0" per_instance="0" />
 <ucis:cgId cgName="shift_coverage_1" moduleName="INST_PARENT_MODULE">
 <ucis:cginstSourceId file="1" line="1" inlineCount="1"/>
 <ucis:cgSourceId file="src/fir.h" line="76" inlineCount="1"/>
 </ucis:cgId>
 <ucis:coverpoint name="shift_cvp" key="KEY" exprString="shifter">
-<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="10" detect_overlap="0" />
+<ucis:options weight="1" goal="100" comment="" at_least="1" auto_bin_max="64" detect_overlap="0" />
 <ucis:coverpointBin name="all1" 
 type="default" alias="24">
 <ucis:range 

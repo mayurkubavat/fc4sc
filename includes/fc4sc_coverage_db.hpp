@@ -1322,6 +1322,9 @@ private:
 
   void load_coverpoint(const xml_node& cvp, coverpoint_base_data_model& data, const std::string& path)
   {
+    data.sync_options_from_parent();
+    if (data.owner_ != nullptr && !data.in_ensure_bins_)
+      data.owner_->ensure_bins();
     // the bins of the model with each name, matched in the order of the file
     std::map<std::string, std::vector<bin_base_data_model*>> regular, illegal, ignore, defaults;
     for (auto b : data.bins_data) regular[b->get_name()].push_back(b);
@@ -1379,6 +1382,14 @@ private:
 
   void load_cross(const xml_node& crs, cross_base_data_model& data, const std::string& path)
   {
+    for (auto* c : data.cross_cvps) {
+      c->sync_options_from_parent();
+      if (c->owner_ != nullptr && !c->in_ensure_bins_)
+        c->owner_->ensure_bins();
+    }
+    data.sync_options_from_parent();
+    if (data.owner_ != nullptr && !data.in_ensure_bins_)
+      data.owner_->ensure_bins();
     for (auto bin : crs.elements("crossBin"))
     {
       if (bin->get("type") == "ignore") continue;

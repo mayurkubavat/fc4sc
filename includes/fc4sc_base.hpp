@@ -48,8 +48,10 @@
 #include <assert.h>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 
 #include "fc4sc_options.hpp"
+#include "fc4sc_type_traits.hpp"
 
 /*
  * Template meta-programming tool used for checking that a parameter
@@ -181,16 +183,16 @@ template<typename forbidden, typename first> struct forbid_type<forbidden, first
 
 // COVERPOINT macro for 3 arguments (no sample condition)
 #define CVP_3(type, cvp_name, sample_expr) \
-        coverpoint<type> cvp_name = \
-        covergroup::register_cvp<type>(&cvp_name, #cvp_name, \
-        CREATE_WRAP_F(sample_expr, type), #sample_expr, \
+        coverpoint<fc4sc::detail::decay_t<type>> cvp_name = \
+        covergroup::register_cvp<fc4sc::detail::decay_t<type>>(&cvp_name, #cvp_name, \
+        CREATE_WRAP_F(sample_expr, fc4sc::detail::decay_t<type>), #sample_expr, \
         CREATE_WRAP_F(true, bool), std::string("")) =
 
 // COVERPOINT macro for 4 arguments (sample condition included)
 #define CVP_4(type, cvp_name, sample_expr, sample_cond) \
-        coverpoint<type> cvp_name = \
-        covergroup::register_cvp<type>(&cvp_name, #cvp_name, \
-        CREATE_WRAP_F(sample_expr, type), #sample_expr, \
+        coverpoint<fc4sc::detail::decay_t<type>> cvp_name = \
+        covergroup::register_cvp<fc4sc::detail::decay_t<type>>(&cvp_name, #cvp_name, \
+        CREATE_WRAP_F(sample_expr, fc4sc::detail::decay_t<type>), #sample_expr, \
         CREATE_WRAP_F(sample_cond, bool), #sample_cond) =
 
 // global var for type name and instance name of default scopes
@@ -209,6 +211,7 @@ using cvp_metadata_t = std::tuple<void*, std::string, std::string>;
 class covVisitorBase;
 class covergroup;
 class cvg_base;
+class cvp_base;
 class scp_base;
 class cross_base;
 class coverpoint_base;
@@ -379,6 +382,11 @@ public:
     return false;
   }
 
+  virtual std::vector<xml_user_attr> get_user_attrs() const
+  {
+    return std::vector<xml_user_attr>();
+  }
+
   /*! Get name of bin */
   virtual std::string& get_name() = 0;
 
@@ -521,6 +529,12 @@ public:
    *  or nullptr if it is in none */
   cvg_base_data_model* parent_cvg = nullptr;
 
+  /*! Owning coverpoint/cross wrapper for deferred bin materialization */
+  cvp_base* owner_ = nullptr;
+
+  /*! Re-entrancy guard for ensure_bins / ensure_cross */
+  mutable bool in_ensure_bins_ = false;
+
   /*! Type options of a coverpoint or cross which is in no covergroup */
   cvp_type_option own_type_option;
 
@@ -569,6 +583,15 @@ public:
   std::vector<size_t> last_bins_hit;
 
   virtual cvp_base* create_instance(cvg_base* cvg_inst) = 0;
+
+  /*! Materialize automatic / distribute_first bins when needed */
+  virtual void ensure_bins() const {}
+
+  /*! Whether bin definitions depend on post-ctor options (auto_bin_max / distribute_first) */
+  virtual bool has_deferred_bins() const { return false; }
+
+  /*! Epoch counter incremented whenever coverpoint bins are rebuilt */
+  virtual uint64_t bins_epoch() const { return 0; }
 
   /*! Instance specific options */
   virtual uint64_t get_weight() = 0;
@@ -733,7 +756,7 @@ public:
   const cvp_base* cvp = nullptr;
 
   /*! Returns which bins of the coverpoint a condition selects */
-  std::function<std::vector<bool>()> select_bins;
+  std::function<std::vector<bool>(const cvp_base*)> select_bins;
 
   /*! Position of the coverpoint in the cross, once resolved */
   size_t position = 0;
@@ -763,20 +786,45 @@ public:
    * positions and the selected bins of their coverpoints in a cross
    * \param cvps The crossed coverpoints
    */
-  std::shared_ptr<const cross_select_node> resolve(const std::vector<cvp_base*>& cvps) const
+  std::shared_ptr<const cross_select_node> resolve(
+      const std::vector<cvp_base*>& cvps,
+      const std::vector<cvp_base*>* orig_cvps = nullptr) const
   {
     std::shared_ptr<cross_select_node> node = std::make_shared<cross_select_node>(*this);
     if (op != condition_) {
-      node->lhs = lhs->resolve(cvps);
-      if (rhs) node->rhs = rhs->resolve(cvps);
+      node->lhs = lhs->resolve(cvps, orig_cvps);
+      if (rhs) node->rhs = rhs->resolve(cvps, orig_cvps);
       return node;
+    }
+    const cvp_base* target_cvp = cvp;
+    if (orig_cvps != nullptr && orig_cvps->size() == cvps.size()) {
+      auto oit = std::find(orig_cvps->begin(), orig_cvps->end(), cvp);
+      if (oit != orig_cvps->end()) {
+        target_cvp = cvps[static_cast<size_t>(oit - orig_cvps->begin())];
+        node->cvp = target_cvp;
+      }
+    }
+    auto it = std::find(cvps.begin(), cvps.end(), target_cvp);
+    if (it == cvps.end())
+      throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
+    node->position = it - cvps.begin();
+    node->bins = select_bins(target_cvp);
+    return node;
+  }
+
+  void validate_non_deferred(const std::vector<cvp_base*>& cvps) const
+  {
+    if (op != condition_) {
+      lhs->validate_non_deferred(cvps);
+      if (rhs) rhs->validate_non_deferred(cvps);
+      return;
     }
     auto it = std::find(cvps.begin(), cvps.end(), cvp);
     if (it == cvps.end())
       throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
-    node->position = it - cvps.begin();
-    node->bins = select_bins();
-    return node;
+    if (!cvp->has_deferred_bins()) {
+      (void)select_bins(cvp);
+    }
   }
 };
 
@@ -1289,6 +1337,23 @@ struct cvg_metadata
   /*! Type options of the coverpoints and crosses, by their names */
   std::map<std::string, cvp_type_option> cvp_type_options;
 
+  /*! Snapshot-diff tracking for distribute_first inheritance */
+  std::map<std::string, bool> synced_cvp_distribute_first_;
+  std::map<std::string, bool> cvp_distribute_first_overridden_;
+
+  void sync_cvp_type_option(const std::string& cvp_name)
+  {
+    cvp_type_option& cvp_opt = cvp_type_options[cvp_name];
+    bool& synced = synced_cvp_distribute_first_[cvp_name];
+    bool& overridden = cvp_distribute_first_overridden_[cvp_name];
+    if (cvp_opt.distribute_first != synced)
+      overridden = true;
+    if (!overridden) {
+      cvp_opt.distribute_first = type_option.distribute_first;
+      synced = cvp_opt.distribute_first;
+    }
+  }
+
   /*! Destructor */
   virtual ~cvg_metadata()
   {
@@ -1304,6 +1369,7 @@ inline cvp_type_option& cvp_base_data_model::type_option()
 {
   if (parent_cvg == nullptr || parent_cvg->type_data == nullptr)
     return own_type_option;
+  parent_cvg->type_data->sync_cvp_type_option(name);
   return parent_cvg->type_data->cvp_type_options[name];
 }
 
@@ -1316,20 +1382,22 @@ inline void coverpoint_base_data_model::sync_options_from_parent()
   if (option.detect_overlap != synced_option_.detect_overlap)
     detect_overlap_overridden_ = true;
 
-  if (parent_cvg == nullptr)
-    return;
-
-  if (!at_least_overridden_) {
-    option.at_least = parent_cvg->option.at_least;
-    synced_option_.at_least = option.at_least;
-  }
-  if (!auto_bin_max_overridden_) {
-    option.auto_bin_max = parent_cvg->option.auto_bin_max;
-    synced_option_.auto_bin_max = option.auto_bin_max;
-  }
-  if (!detect_overlap_overridden_) {
-    option.detect_overlap = parent_cvg->option.detect_overlap;
-    synced_option_.detect_overlap = option.detect_overlap;
+  if (parent_cvg != nullptr) {
+    if (!at_least_overridden_) {
+      option.at_least = parent_cvg->option.at_least;
+      synced_option_.at_least = option.at_least;
+    }
+    if (!auto_bin_max_overridden_) {
+      option.auto_bin_max = parent_cvg->option.auto_bin_max;
+      synced_option_.auto_bin_max = option.auto_bin_max;
+    }
+    if (!detect_overlap_overridden_) {
+      option.detect_overlap = parent_cvg->option.detect_overlap;
+      synced_option_.detect_overlap = option.detect_overlap;
+    }
+    if (parent_cvg->type_data != nullptr) {
+      parent_cvg->type_data->sync_cvp_type_option(name);
+    }
   }
 }
 
@@ -1340,16 +1408,15 @@ inline void cross_base_data_model::sync_options_from_parent()
   if (option.cross_num_print_missing != synced_option_.cross_num_print_missing)
     cross_num_print_missing_overridden_ = true;
 
-  if (parent_cvg == nullptr)
-    return;
-
-  if (!at_least_overridden_) {
-    option.at_least = parent_cvg->option.at_least;
-    synced_option_.at_least = option.at_least;
-  }
-  if (!cross_num_print_missing_overridden_) {
-    option.cross_num_print_missing = parent_cvg->option.cross_num_print_missing;
-    synced_option_.cross_num_print_missing = option.cross_num_print_missing;
+  if (parent_cvg != nullptr) {
+    if (!at_least_overridden_) {
+      option.at_least = parent_cvg->option.at_least;
+      synced_option_.at_least = option.at_least;
+    }
+    if (!cross_num_print_missing_overridden_) {
+      option.cross_num_print_missing = parent_cvg->option.cross_num_print_missing;
+      synced_option_.cross_num_print_missing = option.cross_num_print_missing;
+    }
   }
 }
 

@@ -55,7 +55,7 @@ struct cvg_option
   /*! Minimum of hits for each bin */
   unsigned int at_least;
 
-  /*! Max number of generated bins (inherited by coverpoints; automatic bin generation not yet implemented) */
+  /*! Max number of generated bins (inherited by coverpoints) */
   unsigned int auto_bin_max;
 
   /*! Issue warning if bins overlap in child coverpoints */
@@ -95,7 +95,7 @@ struct cvg_option
     this->weight = 1;
     this->goal = 100;
     this->at_least = 1;
-    this->auto_bin_max = 10;
+    this->auto_bin_max = 64;
     this->detect_overlap = 0;
 
     this->cross_num_print_missing = 0;
@@ -123,7 +123,7 @@ struct cvp_option
   /*! Minimum of hits for each bin */
   unsigned int at_least;
 
-  /*! Max number of generated bins (automatic bin generation not yet implemented) */
+  /*! Max number of generated bins */
   unsigned int auto_bin_max;
 
   /*! Issue a warning for each pair of regular bins of the coverpoint which
@@ -140,7 +140,7 @@ struct cvp_option
     this->weight = 1;
     this->goal = 100;
     this->at_least = 1;
-    this->auto_bin_max = 10;
+    this->auto_bin_max = 64;
     this->detect_overlap = 0;
   }
 
@@ -209,6 +209,9 @@ struct cvp_type_option
   /*! Comment for the type of this coverpoint or cross */
   std::string comment;
 
+  /*! Whether bin_array distributes values before applying .with() filtering */
+  bool distribute_first;
+
   /*!
    * \brief Sets all values to default
    */
@@ -216,6 +219,7 @@ struct cvp_type_option
   {
     weight = 1;
     goal = 100;
+    distribute_first = false;
   }
 };
 
@@ -267,6 +271,9 @@ struct cvg_type_option // covergroup type_option declaration
    */
   bool strict_sv_options;
 
+  /*! Whether bin_array distributes values before applying .with() filtering */
+  bool distribute_first;
+
   /*!
    * \brief Sets all values to default
    */
@@ -276,6 +283,7 @@ struct cvg_type_option // covergroup type_option declaration
     this->goal = 100;
     this->merge_instances = 0;
     this->strict_sv_options = 0;
+    this->distribute_first = false;
   }
 };
 

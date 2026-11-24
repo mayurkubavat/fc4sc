@@ -800,6 +800,13 @@ public:
       stream << "</sequence>\n\n";
     }
 
+    for (const auto& attr : base.get_user_attrs())
+    {
+      stream << "<userAttr key=\"" << escape_xml_chars(attr.key)
+             << "\" type=\"" << escape_xml_chars(attr.type) << "\">"
+             << escape_xml_chars(attr.value) << "</userAttr>\n";
+    }
+
     stream << "</coverpointBin>\n";
 
   }

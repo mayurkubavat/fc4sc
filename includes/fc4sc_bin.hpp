@@ -63,10 +63,9 @@ template <typename T> class bin;
  * type as a number, and a 64-bit value without truncation
  */
 template <typename T>
-inline std::string to_decimal(T value)
+inline std::string to_decimal(const T& value)
 {
-  typedef typename std::conditional<std::is_signed<T>::value, long long, unsigned long long>::type wide_t;
-  return std::to_string(static_cast<wide_t>(value));
+  return fc4sc_type_traits<T>::to_ucis_integer(value);
 }
 
 template <typename T>
@@ -231,13 +230,15 @@ inline void parse_wildcard(const std::string& pattern, unsigned int width,
 template <typename T>
 std::vector<interval_t<T>> wildcard(const std::string& pattern)
 {
-  static_assert(std::is_integral<T>::value && !std::is_same<T, bool>::value,
-                "Type must be integral!");
-  typedef typename std::make_unsigned<T>::type U;
-  const unsigned int width = std::numeric_limits<U>::digits;
+  typedef fc4sc_type_traits<T> traits;
+  static_assert(traits::supports_wildcard,
+                "Type does not support wildcard patterns!");
+  const unsigned int width = traits::bit_width;
+  static_assert(traits::bit_width <= 64,
+                "Wildcard patterns require bit width <= 64!");
 
   uint64_t value, care;
-  parse_wildcard(pattern, width, std::is_signed<T>::value, value, care);
+  parse_wildcard(pattern, width, traits::is_signed, value, care);
 
   // the don't care bits at the bottom make one block of consecutive values,
   // all combinations of the other don't care bits give the blocks to match
@@ -251,9 +252,9 @@ std::vector<interval_t<T>> wildcard(const std::string& pattern)
   if (free_bits.size() >= 64 || (uint64_t(1) << free_bits.size()) > wildcard_max_intervals)
     throw std::invalid_argument("Wildcard pattern \"" + pattern + "\" matches too many intervals");
 
-  const U block = (low >= width) ? std::numeric_limits<U>::max()
-                                 : static_cast<U>((uint64_t(1) << low) - 1);
-  const U sign = static_cast<U>(U(1) << (width - 1));
+  const uint64_t mask = (width >= 64) ? ~uint64_t(0) : ((uint64_t(1) << width) - 1);
+  const uint64_t block = (low >= width) ? mask : ((uint64_t(1) << low) - 1);
+  const uint64_t sign = uint64_t(1) << (width - 1);
 
   std::vector<interval_t<T>> intervals;
   for (uint64_t comb = 0; comb < (uint64_t(1) << free_bits.size()); ++comb)
@@ -262,26 +263,28 @@ std::vector<interval_t<T>> wildcard(const std::string& pattern)
     for (size_t i = 0; i < free_bits.size(); ++i)
       if ((comb >> i) & 1) start |= (uint64_t(1) << free_bits[i]);
 
-    const U lo = static_cast<U>(start);
-    const U hi = static_cast<U>(lo + block);
-    if (std::is_signed<T>::value && lo < sign && hi >= sign) {
+    const uint64_t lo = start & mask;
+    const uint64_t hi = (lo + block) & mask;
+    if (traits::is_signed && lo < sign && hi >= sign) {
       // the block crosses from positive to negative values
-      intervals.push_back(interval(static_cast<T>(lo), static_cast<T>(sign - 1)));
-      intervals.push_back(interval(static_cast<T>(sign), static_cast<T>(hi)));
+      intervals.push_back(interval(traits::from_bits_u64(lo), traits::from_bits_u64(sign - 1)));
+      intervals.push_back(interval(traits::from_bits_u64(sign), traits::from_bits_u64(hi)));
     }
     else {
-      intervals.push_back(interval(static_cast<T>(lo), static_cast<T>(hi)));
+      intervals.push_back(interval(traits::from_bits_u64(lo), traits::from_bits_u64(hi)));
     }
   }
 
-  std::sort(intervals.begin(), intervals.end());
+  std::sort(intervals.begin(), intervals.end(), [](const interval_t<T>& a, const interval_t<T>& b) {
+    return traits::less(a.first, b.first);
+  });
 
   // merge the intervals which are next to each other
   std::vector<interval_t<T>> merged;
   for (auto &intv : intervals)
   {
-    if (!merged.empty() && merged.back().second != std::numeric_limits<T>::max() &&
-        merged.back().second + 1 == intv.first)
+    if (!merged.empty() && !traits::equal(merged.back().second, traits::max_value()) &&
+        traits::equal(traits::next(merged.back().second), intv.first))
       merged.back().second = intv.second;
     else
       merged.push_back(intv);
@@ -301,15 +304,16 @@ std::vector<interval_t<T>> wildcard(const std::string& pattern)
 template <typename T>
 std::vector<T> wildcard_values(const std::string& pattern)
 {
+  typedef fc4sc_type_traits<T> traits;
   std::vector<T> values;
   for (auto &intv : wildcard<T>(pattern))
   {
-    for (T v = intv.first; ; ++v)
+    for (T v = intv.first; ; v = traits::next(v))
     {
       if (values.size() >= wildcard_max_intervals)
         throw std::invalid_argument("Wildcard pattern \"" + pattern + "\" matches too many values");
       values.push_back(v);
-      if (v == intv.second) break;
+      if (traits::equal(v, intv.second)) break;
     }
   }
   return values;
@@ -335,20 +339,25 @@ static const uint64_t with_max_values = 1 << 20;
  */
 template <typename T, typename F>
 std::vector<T> with_values(const std::vector<interval_t<T>>& intervals, F pred,
-                           const std::string& bin_name)
+                           const std::string& bin_name, uint64_t* total_tested = nullptr)
 {
+  typedef fc4sc_type_traits<T> traits;
   std::vector<T> values;
-  uint64_t count = 0;
+  uint64_t local_count = 0;
+  uint64_t& count = (total_tested != nullptr) ? *total_tested : local_count;
   for (auto intv : intervals)
   {
-    if (intv.first > intv.second) std::swap(intv.first, intv.second);
-    for (T v = intv.first; ; v = static_cast<T>(v + 1))
+    intv = traits::validate_interval(intv.first, intv.second);
+    if (!traits::is_discrete && !traits::equal(intv.first, intv.second))
+      throw std::invalid_argument("The with clause of bin \"" + bin_name +
+                                  "\" is not supported on non-discrete intervals");
+    for (T v = intv.first; ; v = traits::next(v))
     {
       if (++count > with_max_values)
         throw std::invalid_argument("The with clause of bin \"" + bin_name +
                                     "\" has more than 1048576 values to test");
       if (pred(v)) values.push_back(v);
-      if (v == intv.second) break;
+      if (traits::equal(v, intv.second)) break;
     }
   }
   return values;
@@ -360,13 +369,18 @@ std::vector<T> with_values(const std::vector<interval_t<T>>& intervals, F pred,
 template <typename T>
 std::vector<interval_t<T>> values_to_intervals(std::vector<T> values)
 {
-  std::sort(values.begin(), values.end());
-  values.erase(std::unique(values.begin(), values.end()), values.end());
+  typedef fc4sc_type_traits<T> traits;
+  for (size_t i = 0; i < values.size(); ++i)
+    values[i] = traits::validate_point(static_cast<T>(values[i]));
+  std::sort(values.begin(), values.end(), typename traits::less_comp());
+  values.erase(std::unique(values.begin(), values.end(),
+      [](const T& a, const T& b) { return traits::equal(a, b); }), values.end());
   std::vector<interval_t<T>> intervals;
-  for (auto v : values)
+  for (const T& v : values)
   {
-    if (!intervals.empty() && intervals.back().second != std::numeric_limits<T>::max() &&
-        static_cast<T>(intervals.back().second + 1) == v)
+    if (!intervals.empty() && traits::is_discrete &&
+        !traits::equal(intervals.back().second, traits::max_value()) &&
+        traits::equal(traits::next(intervals.back().second), v))
       intervals.back().second = v;
     else
       intervals.push_back(interval_t<T>(v, v));
@@ -422,7 +436,8 @@ public:
     std::vector<interval_t<int>> intervals_int;
     for(auto inter_it : intervals)
     {
-      intervals_int.push_back({static_cast<int>(inter_it.first),static_cast<int>(inter_it.second)});
+      intervals_int.push_back({fc4sc_type_traits<T>::to_int(inter_it.first),
+                               fc4sc_type_traits<T>::to_int(inter_it.second)});
     }
     return intervals_int;
   }
@@ -434,6 +449,15 @@ public:
     for (auto &intv : intervals)
       intervals_dec.push_back(interval_t<std::string>(to_decimal(intv.first), to_decimal(intv.second)));
     return intervals_dec;
+  }
+
+  std::vector<xml_user_attr> get_user_attrs() const override
+  {
+    std::vector<xml_user_attr> attrs;
+    if (!fc4sc_type_traits<T>::has_xml_display_attrs) return attrs;
+    for (size_t i = 0; i < intervals.size(); ++i)
+      fc4sc_type_traits<T>::append_range_user_attrs(intervals[i].first, intervals[i].second, i, attrs);
+    return attrs;
   }
 
   void accept_visitor(covVisitorBase& visitor)
@@ -451,8 +475,7 @@ template <class T>
 class bin : public bin_base
 {
 private:
-  //all bin types required to be integral since floating point bins result in ambiguous intervals for bins
-  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  static_assert(fc4sc_type_traits<T>::is_supported, "Type is not supported by fc4sc!");
   friend binsof<T>;
   friend coverpoint<T>;
 
@@ -466,8 +489,9 @@ private:
    *  \param args Rest of arguments
    */
   template <typename... Args>
-  bin(T value, Args... args) noexcept : bin(args...) {
-    bin_data->intervals.push_back(interval(value, value));
+  bin(T value, Args... args) : bin(args...) {
+    const T v = fc4sc_type_traits<T>::validate_point(value);
+    bin_data->intervals.push_back(interval(v, v));
     bin_data->interval_hits.push_back(0);
   }
 
@@ -478,10 +502,11 @@ private:
    *  \param args Rest of arguments
    */
   template <typename... Args>
-  bin(const std::vector<T>& values, Args... args) noexcept : bin(args...) {
-    for (auto value : values)
+  bin(const std::vector<T>& values, Args... args) : bin(args...) {
+    for (const T& value : values)
     {
-      bin_data->intervals.push_back(interval(static_cast<T>(value), static_cast<T>(value)));
+      const T v = fc4sc_type_traits<T>::validate_point(value);
+      bin_data->intervals.push_back(interval(v, v));
       bin_data->interval_hits.push_back(0);
     }
   }
@@ -492,14 +517,11 @@ private:
    *  \param args Rest of arguments
    */
   template <typename... Args>
-  bin(std::vector<interval_t<T>> intervals_vec, Args... args) noexcept : bin(args...) {
-    for(auto interval : intervals_vec)
+  bin(std::vector<interval_t<T>> intervals_vec, Args... args) : bin(args...) {
+    for(auto intv : intervals_vec)
     {
-      bin_data->intervals.push_back(interval);
+      bin_data->intervals.push_back(fc4sc_type_traits<T>::validate_interval(intv.first, intv.second));
       bin_data->interval_hits.push_back(0);
-      if (bin_data->intervals.back().first > bin_data->intervals.back().second) {
-        std::swap(bin_data->intervals.back().first, bin_data->intervals.back().second);
-      }
     }
   }
 
@@ -509,12 +531,9 @@ private:
    *  \param args Rest of arguments
    */
   template <typename... Args>
-  bin(interval_t<T> interval, Args... args) noexcept : bin(args...) {
-    bin_data->intervals.push_back(interval);
+  bin(interval_t<T> intv, Args... args) : bin(args...) {
+    bin_data->intervals.push_back(fc4sc_type_traits<T>::validate_interval(intv.first, intv.second));
     bin_data->interval_hits.push_back(0);
-    if (bin_data->intervals.back().first > bin_data->intervals.back().second) {
-      std::swap(bin_data->intervals.back().first, bin_data->intervals.back().second);
-    }
   }
 
 protected:
@@ -576,7 +595,7 @@ protected:
    */
   struct IntervalComp {
     bool operator() (const fc4sc::interval_t<T>& a, const fc4sc::interval_t<T>& b) const {
-      return a.first < b.first;
+      return fc4sc_type_traits<T>::less(a.first, b.first);
     }
   };
 
@@ -585,19 +604,20 @@ protected:
    */
   void remove_interval_overlap()
   {
+    typedef fc4sc_type_traits<T> traits;
     if (bin_data->intervals.empty()) return;
     sort(bin_data->intervals.begin(),bin_data->intervals.end(),IntervalComp());
     auto intrv_end = bin_data->intervals.begin();
     for (auto intrv = std::next(intrv_end); intrv != bin_data->intervals.end(); intrv++)
     {
-      if(intrv_end->second >= intrv->first) {
+      if(!traits::less(intrv_end->second, intrv->first)) {
         // an interval inside the one before it does not shorten that one
-        if(intrv->second > intrv_end->second)
+        if(traits::less(intrv_end->second, intrv->second))
           intrv_end->second = intrv->second;
 	std::cerr << "Warning: Merging overlapping intervals "
-	          << "("  << intrv_end->first << "," << intrv_end->second << ")"
+	          << "("  << traits::to_string(intrv_end->first) << "," << traits::to_string(intrv_end->second) << ")"
 		  << " and "
-		  << "(" << intrv->first << "," << intrv->second << ")"
+		  << "(" << traits::to_string(intrv->first) << "," << traits::to_string(intrv->second) << ")"
 	          << " within bin \"" << this->bin_data->name << "\"\n";
       }
       else {
@@ -649,7 +669,8 @@ public:
     std::vector<interval_t<int>> intervals_int;
     for(auto inter_it : bin_data->intervals)
     {
-      intervals_int.push_back({static_cast<int>(inter_it.first),static_cast<int>(inter_it.second)});
+      intervals_int.push_back({fc4sc_type_traits<T>::to_int(inter_it.first),
+                               fc4sc_type_traits<T>::to_int(inter_it.second)});
     }
     return intervals_int;
   }
@@ -671,6 +692,10 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if (!cvp.cvp_data->in_ensure_bins_) {
+      cvp.prepare_explicit_bin();
+      cvp.record_bin_spec(*this);
+    }
     if (drop_if_empty()) return;
     remove_interval_overlap();
     cvp.insert_intervals(cvp.regular_interval_map,*this,cvp.bins.size());
@@ -685,7 +710,7 @@ public:
    *  \param args Rest of arguments
    */
   template<typename ...Args>
-  explicit bin(const std::string &bin_name, Args... args) noexcept : bin(args...) {
+  explicit bin(const std::string &bin_name, Args... args) : bin(args...) {
     static_assert(forbid_type<std::string, Args...>::value, "Bin constructor accepts only 1 name argument!");
     this->bin_data->name = bin_name;
     this->bin_data->bin_type = bin_t::default_;
@@ -697,7 +722,7 @@ public:
    *  \param args Rest of arguments
    */
   template<typename ...Args>
-  explicit bin(const char *bin_name, Args... args) noexcept : bin(std::string(bin_name), args...) {}
+  explicit bin(const char *bin_name, Args... args) : bin(std::string(bin_name), args...) {}
 
   /*! Default Destructor */
   virtual ~bin() = default;
@@ -748,7 +773,9 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
-    if(val >= this->bin_data->intervals[interval_index].first && val <= this->bin_data->intervals[interval_index].second) {
+    if(fc4sc_type_traits<T>::in_interval(
+           val, this->bin_data->intervals[interval_index].first,
+           this->bin_data->intervals[interval_index].second)) {
       this->bin_data->interval_hits[interval_index]++;
       return 1;
     }
@@ -769,7 +796,8 @@ public:
       throw("Error: coverage data has been deleted");
     }
     for (size_t i = 0; i < bin_data->intervals.size(); ++i)
-      if (bin_data->intervals[i].first <= val && bin_data->intervals[i].second >= val)
+      if (fc4sc_type_traits<T>::in_interval(
+              val, bin_data->intervals[i].first, bin_data->intervals[i].second))
         return true;
 
     return false;
@@ -797,7 +825,7 @@ public:
 template <class T>
 class illegal_bin final : public bin<T>
 {
-  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  static_assert(fc4sc_type_traits<T>::is_supported, "Type is not supported by fc4sc!");
   friend class coverpoint<T>;
 protected:
   
@@ -836,11 +864,12 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
-    if(val >= this->bin_data->intervals[interval_index].first && val <= this->bin_data->intervals[interval_index].second) {
+    if(fc4sc_type_traits<T>::in_interval(
+           val, this->bin_data->intervals[interval_index].first,
+           this->bin_data->intervals[interval_index].second)) {
       // construct exception to be thrown
-      std::stringstream ss; ss << val;
       illegal_bin_sample_exception e;
-      e.update_bin_info(this->bin_data->name, ss.str());
+      e.update_bin_info(this->bin_data->name, fc4sc_type_traits<T>::to_string(val));
       this->bin_data->interval_hits[interval_index]++;
       throw e;
     }
@@ -857,6 +886,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
     if (this->drop_if_empty()) return;
+    cvp.invalidate_auto_bins();
     bin<T>::remove_interval_overlap();
     cvp.insert_intervals(cvp.illegal_interval_map,*this,cvp.illegal_bins.size());
     cvp.illegal_bins.push_back(*this);
@@ -869,7 +899,7 @@ public:
 template <class T>
 class ignore_bin final : public bin<T>
 {
-  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  static_assert(fc4sc_type_traits<T>::is_supported, "Type is not supported by fc4sc!");
 protected:
 
   ignore_bin() = delete;
@@ -904,6 +934,7 @@ public:
       throw("Error: coverage data has been deleted");
     }
     if (this->drop_if_empty()) return;
+    cvp.invalidate_auto_bins();
     bin<T>::remove_interval_overlap();
     cvp.insert_intervals(cvp.ignore_interval_map,*this,cvp.ignore_bins.size());
     cvp.ignore_bins.push_back(*this);
@@ -915,39 +946,19 @@ public:
 
 
 template <typename T>
-inline T add_offset_impl(T lo, uint64_t offset, std::false_type)
-{
-  return static_cast<T>(static_cast<uint64_t>(lo) + offset);
-}
-
-template <typename T>
-inline T add_offset_impl(T lo, uint64_t offset, std::true_type)
-{
-  const int64_t lo64 = static_cast<int64_t>(lo);
-  if (lo64 >= 0) {
-    return static_cast<T>(static_cast<int64_t>(static_cast<uint64_t>(lo64) + offset));
-  }
-  const uint64_t neg_mag = static_cast<uint64_t>(-(lo64 + 1)) + 1ULL;
-  if (offset >= neg_mag) {
-    return static_cast<T>(static_cast<int64_t>(offset - neg_mag));
-  }
-  const uint64_t rem = neg_mag - offset;
-  return static_cast<T>(-static_cast<int64_t>(rem - 1ULL) - 1);
-}
-
-template <typename T>
 inline T add_offset(T lo, uint64_t offset)
 {
-  return add_offset_impl(lo, offset, std::is_signed<T>());
+  return fc4sc_type_traits<T>::add_offset(lo, offset);
 }
 
 template <class T>
 class bin_array final : public bin<T>
 {
-  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  static_assert(fc4sc_type_traits<T>::is_supported, "Type is not supported by fc4sc!");
+  friend class coverpoint<T>;
 protected:
 
-  uint64_t count;
+  uint64_t count = 0;
   bool sparse = false;
 
   /*!
@@ -956,6 +967,14 @@ protected:
    */
   bool distribute = false;
 
+  std::string orig_name_;
+  std::vector<interval_t<T>> orig_intervals_;
+  std::vector<T> orig_values_;
+  uint64_t orig_count_ = 0;
+  bool orig_sparse_ = false;
+  bool orig_from_values_ = false;
+  std::vector<std::function<bool(const T&)>> with_preds_;
+
   bin_array() = delete;
 
 public:
@@ -963,45 +982,63 @@ public:
    * \brief Constructs an bin_array which will split an interval into multiple
    * equal parts. The number of sub-intervals is specified via the count argument
    */
-  explicit bin_array(const std::string &name, uint64_t count, interval_t<T> interval) noexcept :
-    bin<T>(name, interval), count(count), sparse(false) {}
+  explicit bin_array(const std::string &name, uint64_t count, interval_t<T> intv) :
+    bin<T>(name, intv), count(count), sparse(false),
+    orig_name_(name), orig_count_(count), orig_sparse_(false), orig_from_values_(false)
+  {
+    orig_intervals_.push_back(fc4sc_type_traits<T>::validate_interval(intv.first, intv.second));
+  }
 
   /*!
    * \brief Constructs an bin_array from a vector of intervals where each
    * interval will be nested by a bin
    */
-  explicit bin_array(const std::string &name, std::vector<interval_t<T>>&& intvs) noexcept :
-    count(intvs.size()), sparse(true)
+  explicit bin_array(const std::string &name, std::vector<interval_t<T>>&& intvs) :
+    count(intvs.size()), sparse(true),
+    orig_name_(name), orig_count_(intvs.size()), orig_sparse_(true), orig_from_values_(false)
   {
     this->bin_data->name = name;
-    this->bin_data->intervals = std::move(intvs);
+    this->bin_data->bin_type = bin_t::default_;
+    for (const auto& iv : intvs) {
+      this->bin_data->intervals.push_back(fc4sc_type_traits<T>::validate_interval(iv.first, iv.second));
+    }
+    orig_intervals_ = this->bin_data->intervals;
   }
 
   /*!
    * \brief Constructs an bin_array from a vector of intervals ref where each
    * interval will be nested by a bin
    */
-  explicit bin_array(const std::string &name, std::vector<interval_t<T>>& intvs) noexcept :
-    count(intvs.size()), sparse(true)
+  explicit bin_array(const std::string &name, std::vector<interval_t<T>>& intvs) :
+    count(intvs.size()), sparse(true),
+    orig_name_(name), orig_count_(intvs.size()), orig_sparse_(true), orig_from_values_(false)
   {
     this->bin_data->name = name;
-    this->bin_data->intervals = intvs;
+    this->bin_data->bin_type = bin_t::default_;
+    for (const auto& iv : intvs) {
+      this->bin_data->intervals.push_back(fc4sc_type_traits<T>::validate_interval(iv.first, iv.second));
+    }
+    orig_intervals_ = this->bin_data->intervals;
   }
 
   /*!
    * \brief Constructs an bin_array from a vector of values where each
    * values will be nested by a bin
    */
-  explicit bin_array(const std::string &name, const std::vector<T>& intvs) noexcept :
-    count(intvs.size()), sparse(true)
+  explicit bin_array(const std::string &name, const std::vector<T>& vals) :
+    count(vals.size()), sparse(true),
+    orig_name_(name), orig_values_(vals), orig_count_(vals.size()), orig_sparse_(true), orig_from_values_(true)
   {
     this->bin_data->name = name;
+    this->bin_data->bin_type = bin_t::default_;
     this->bin_data->intervals.clear();
     this->bin_data->intervals.reserve(this->count);
-    // transform each value in the input vector to an interval
-    std::transform(intvs.begin(), intvs.end(),
-                   std::back_inserter(this->bin_data->intervals),
-                   [](const T& v) { return fc4sc::interval(v,v); });
+    for (size_t i = 0; i < orig_values_.size(); ++i) {
+      const T v = fc4sc_type_traits<T>::validate_point(static_cast<T>(orig_values_[i]));
+      orig_values_[i] = v;
+      this->bin_data->intervals.push_back(fc4sc::interval(v, v));
+    }
+    orig_intervals_ = this->bin_data->intervals;
   }
 
   /*!
@@ -1024,6 +1061,8 @@ public:
     this->count = count;
     this->sparse = false;
     this->distribute = true;
+    this->orig_count_ = count;
+    this->orig_sparse_ = false;
   }
 
   virtual ~bin_array() = default;
@@ -1031,14 +1070,6 @@ public:
   /*!
    *  \brief Keeps the values of the bin array which satisfy a predicate, as
    *  the SystemVerilog with clause, see \link fc4sc::bin::with \endlink
-   *
-   *    With the values of a vector, as "bins b[] = {[0:15]} with (item % 3 == 0);",
-   *  which is written bin_array<int>("b", std::vector<interval_t<int>>{interval(0, 15)})
-   *  .with([](int v) { return v % 3 == 0; }), there is a bin for each value
-   *  kept, b[0] to b[5] for the values 0, 3, ... 15. With a number of bins,
-   *  as "bins b[4] = {[0:15]} with (item % 3 == 0);", written
-   *  bin_array<int>("b", 4, interval(0, 15)).with(...), the values kept are
-   *  distributed among the bins as for bin_array(name, count, values).
    */
   template <typename F>
   bin_array<T> with(F pred)
@@ -1047,9 +1078,11 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    std::function<bool(const T&)> fn(pred);
+    with_preds_.push_back(fn);
     auto values = with_values(this->bin_data->intervals, pred, this->bin_data->name);
     this->bin_data->intervals.clear();
-    for (auto v : values)
+    for (const T& v : values)
       this->bin_data->intervals.push_back(interval(v, v));
     this->bin_data->interval_hits.clear();
     if (this->sparse)
@@ -1059,86 +1092,141 @@ public:
     return *this;
   }
 
+  void add_to_cvp_with_mode(coverpoint<T> &cvp, bool distribute_first)
+  {
+    typedef fc4sc_type_traits<T> traits;
+    if (!this->orig_sparse_ && this->orig_count_ == 0)
+      throw std::invalid_argument("Bin array \"" + this->orig_name_ + "\" needs at least one bin");
+
+    const bool prev_guard = cvp.cvp_data->in_ensure_bins_;
+    cvp.cvp_data->in_ensure_bins_ = true;
+    try {
+      if (distribute_first && !with_preds_.empty() && !this->orig_sparse_) {
+        auto matches_all = [&](const T& v) -> bool {
+          for (const auto& pred : with_preds_) {
+            if (!pred(v)) return false;
+          }
+          return true;
+        };
+        if (this->orig_from_values_) {
+          const uint64_t nvals = this->orig_values_.size();
+          const uint64_t per_bin = nvals / this->orig_count_;
+          for (uint64_t i = 0; i < this->orig_count_; ++i) {
+            uint64_t first = i * per_bin;
+            uint64_t last = (i == this->orig_count_ - 1) ? nvals : first + per_bin;
+            if (per_bin == 0) {
+              if (i >= nvals) break;
+              first = i;
+              last = i + 1;
+            }
+            std::vector<T> kept;
+            for (uint64_t k = first; k < last; ++k) {
+              if (matches_all(this->orig_values_[k]))
+                kept.push_back(this->orig_values_[k]);
+            }
+            if (!kept.empty()) {
+              std::stringstream ss;
+              ss << this->orig_name_ << "[" << i << "]";
+              bin<T>(ss.str(), values_to_intervals(kept)).add_to_cvp(cvp);
+            }
+          }
+        } else {
+          const T lo = this->orig_intervals_[0].first;
+          const T hi = this->orig_intervals_[0].second;
+          auto buckets = traits::split_interval(lo, hi, this->orig_count_, true);
+          uint64_t total_tested = 0;
+          for (size_t i = 0; i < buckets.size(); ++i) {
+            std::vector<interval_t<T>> one(1, buckets[i]);
+            auto kept = with_values(one, matches_all, this->orig_name_, &total_tested);
+            if (!kept.empty()) {
+              std::stringstream ss;
+              ss << this->orig_name_ << "[" << i << "]";
+              bin<T>(ss.str(), values_to_intervals(kept)).add_to_cvp(cvp);
+            }
+          }
+        }
+        if (this->bin_data != nullptr && this->valid_data.use_count() > 0) {
+          delete this->bin_data;
+          this->bin_data = nullptr;
+        }
+      } else if (this->distribute) {
+        auto& values = this->bin_data->intervals;
+        const uint64_t per_bin = values.size() / this->count;
+        std::stringstream ss;
+        for (uint64_t i = 0; i < this->count; ++i) {
+          uint64_t first = i * per_bin;
+          uint64_t last = (i == this->count - 1) ? values.size() : first + per_bin;
+          if (per_bin == 0) {
+            if (i >= values.size()) break;
+            first = i;
+            last = i + 1;
+          }
+          std::vector<T> bin_values;
+          for (uint64_t k = first; k < last; ++k)
+            bin_values.push_back(values[k].first);
+          ss << this->bin_data->name << "[" << i << "]";
+          bin<T>(ss.str(), values_to_intervals(bin_values)).add_to_cvp(cvp);
+          ss.str(std::string());
+        }
+        if (this->bin_data != nullptr && this->valid_data.use_count() > 0) {
+          delete this->bin_data;
+          this->bin_data = nullptr;
+        }
+      } else if (this->sparse) {
+        std::stringstream ss;
+        for (size_t i = 0; i < this->bin_data->intervals.size(); ++i) {
+          ss << this->bin_data->name << "[" << i << "]";
+          bin<T>(ss.str(), this->bin_data->intervals[i]).add_to_cvp(cvp);
+          ss.str(std::string());
+        }
+        if (this->bin_data != nullptr && this->valid_data.use_count() > 0) {
+          delete this->bin_data;
+          this->bin_data = nullptr;
+        }
+      } else {
+        const T lo = this->bin_data->intervals[0].first;
+        const T hi = this->bin_data->intervals[0].second;
+        uint64_t dist = 0;
+        if (traits::is_discrete && traits::try_distance_u64(lo, hi, dist) && this->count - 1 > dist) {
+          this->bin<T>::add_to_cvp(cvp);
+        } else {
+          auto parts = traits::split_interval(lo, hi, this->count, false);
+          if (parts.size() == 1 && this->count > 1) {
+            this->bin<T>::add_to_cvp(cvp);
+          } else {
+            std::stringstream ss;
+            for (size_t i = 0; i < parts.size(); ++i) {
+              ss << this->bin_data->name << "[" << i << "]";
+              bin<T>(ss.str(), parts[i]).add_to_cvp(cvp);
+              ss.str(std::string());
+            }
+            if (this->bin_data != nullptr && this->valid_data.use_count() > 0) {
+              delete this->bin_data;
+              this->bin_data = nullptr;
+            }
+          }
+        }
+      }
+    } catch (...) {
+      cvp.cvp_data->in_ensure_bins_ = prev_guard;
+      throw;
+    }
+    cvp.cvp_data->in_ensure_bins_ = prev_guard;
+  }
+
   /* Virtual function used to register this bin inside a coverpoint */
   virtual void add_to_cvp(coverpoint<T> &cvp) override
   {
     if (!this->sparse && this->count == 0)
-      throw std::invalid_argument("Bin array \"" + this->bin_data->name + "\" needs at least one bin");
-    if (this->distribute) {
-      // the values, one in each interval, distributed among count bins
-      auto& values = this->bin_data->intervals;
-      const uint64_t per_bin = values.size() / this->count;
-      std::stringstream ss;
-      for (uint64_t i = 0; i < this->count; ++i) {
-        uint64_t first = i * per_bin;
-        uint64_t last = (i == this->count - 1) ? values.size() : first + per_bin;
-        if (per_bin == 0) {
-          // fewer values than bins: one value in each of the first bins
-          if (i >= values.size()) break;
-          first = i;
-          last = i + 1;
-        }
-        std::vector<T> bin_values;
-        for (uint64_t k = first; k < last; ++k)
-          bin_values.push_back(values[k].first);
-        ss << this->bin_data->name << "[" << i << "]";
-        bin<T>(ss.str(), values_to_intervals(bin_values)).add_to_cvp(cvp);
-        ss.str(std::string()); // clear the stringstream
-      }
+      throw std::invalid_argument("Bin array \"" + this->orig_name_ + "\" needs at least one bin");
+    if (!cvp.cvp_data->in_ensure_bins_) {
+      cvp.prepare_explicit_bin();
+      if (!with_preds_.empty()) cvp.has_with_bin_array_ = true;
+      cvp.record_bin_array_spec(*this);
     }
-    else if (this->sparse) {
-      // bin array was defined by using a vector of intervals or values
-      // create a new bin for each value/interval and add it to the coverpoint
-      std::stringstream ss;
-
-      for (size_t i = 0; i < this->bin_data->intervals.size(); ++i) {
-        ss << this->bin_data->name << "[" << i << "]";
-        //cvp.bins.push_back(bin<T>(ss.str(), this->bin_data->intervals[i]));
-	bin<T>(ss.str(), this->bin_data->intervals[i]).add_to_cvp(cvp);
-        ss.str(std::string()); // clear the stringstream
-      }
-    }
-    else {
-      // bin array was defined by using an interval which needs to be split into
-      // multiple pieces. The interval is found in the this->bin_data->intervals[0]
-      const T lo = this->bin_data->intervals[0].first;
-      const T hi = this->bin_data->intervals[0].second;
-      const uint64_t dist = static_cast<uint64_t>(hi) - static_cast<uint64_t>(lo);
-
-      if (this->count - 1 > dist) {
-        // This bin array interval cannot be split into pieces. Add a single
-        // bin containing the whole interval to the coverpoint. We can simply
-        // use this object since it already matches the bin that we need!
-        this->bin<T>::add_to_cvp(cvp);
-      }
-      else if (this->count == 1) {
-        bin<T>(this->bin_data->name + "[0]", interval(lo, hi)).add_to_cvp(cvp);
-      }
-      else {
-        std::stringstream ss;
-        // Split [lo, hi] (dist + 1 elements) across count >= 2 bins:
-        // first count - 1 bins get q = floor((dist + 1) / count), last bin gets remainder.
-        const uint64_t k = dist / this->count;
-        const uint64_t m = dist % this->count;
-        const uint64_t q = k + ((m == this->count - 1) ? 1ULL : 0ULL);
-
-        uint64_t offset = 0;
-        for (uint64_t i = 0; i < this->count; ++i) {
-          ss << this->bin_data->name << "[" << i << "]";
-          const T start = add_offset(lo, offset);
-          const T end = (i == this->count - 1) ? hi : add_offset(lo, offset + (q - 1));
-          bin<T>(ss.str(), interval(start, end)).add_to_cvp(cvp);
-          if (i != this->count - 1) {
-            offset += q;
-          }
-          ss.str(std::string()); // clear the stringstream
-        }
-      }
-    }
+    const bool df = cvp.cvp_data->type_option().distribute_first;
+    add_to_cvp_with_mode(cvp, df);
   }
-
-
-
 };
 
 /*!
@@ -1150,15 +1238,6 @@ static const uint64_t trans_max_sequences = 1 << 16;
  * \brief Maximum number of values in all the value sequences of a transition
  */
 static const uint64_t trans_max_values = 1 << 20;
-
-/*!
- * \brief Unsigned type with the bits of T, also for bool
- */
-template <typename T, bool = std::is_same<T, bool>::value>
-struct trans_unsigned { typedef typename std::make_unsigned<T>::type type; };
-
-template <typename T>
-struct trans_unsigned<T, true> { typedef unsigned char type; };
 
 /*!
  * \brief Maximum number of values a transition with goto or nonconsecutive
@@ -1474,7 +1553,7 @@ private:
   {
     bool in = false;
     for (auto &intv : positions[p].values)
-      in = in || (intv.first <= value && value <= intv.second);
+      in = in || fc4sc_type_traits<T>::in_interval(value, intv.first, intv.second);
     return in != positions[p].negated;
   }
 };
@@ -1604,7 +1683,7 @@ public:
 template <typename T>
 class trans
 {
-  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  static_assert(fc4sc_type_traits<T>::is_supported, "Type is not supported by fc4sc!");
 
   struct step_t
   {
@@ -1618,13 +1697,14 @@ class trans
 
   static std::vector<interval_t<T>> to_set(T value)
   {
-    return std::vector<interval_t<T>>{interval(value, value)};
+    const T v = fc4sc_type_traits<T>::validate_point(value);
+    return std::vector<interval_t<T>>{interval(v, v)};
   }
 
   static std::vector<interval_t<T>> to_set(interval_t<T> intv)
   {
-    if (intv.first > intv.second) std::swap(intv.first, intv.second);
-    return std::vector<interval_t<T>>{intv};
+    return std::vector<interval_t<T>>{
+        fc4sc_type_traits<T>::validate_interval(intv.first, intv.second)};
   }
 
   static std::vector<interval_t<T>> to_set(const std::vector<interval_t<T>>& intvs)
@@ -1638,8 +1718,10 @@ class trans
   static std::vector<interval_t<T>> to_set(const std::vector<T>& values)
   {
     std::vector<interval_t<T>> set;
-    for (auto &value : values)
-      set.push_back(interval(value, value));
+    for (const T& value : values) {
+      const T v = fc4sc_type_traits<T>::validate_point(value);
+      set.push_back(interval(v, v));
+    }
     return set;
   }
 
@@ -1666,9 +1748,7 @@ class trans
   /*! Writes a value as a number, also for the char types */
   static std::string to_text(T value)
   {
-    std::stringstream ss;
-    ss << +value;
-    return ss.str();
+    return fc4sc_type_traits<T>::to_string(value);
   }
 
   /*! Adds n to count and checks that count stays within the limit */
@@ -1703,19 +1783,13 @@ class trans
     count *= n;
   }
 
-  typedef typename trans_unsigned<T>::type U;
-
   /*! Number of values in a step */
   static uint64_t values_count(const std::vector<interval_t<T>>& set)
   {
     uint64_t count = 0;
     for (auto &intv : set)
     {
-      // number of values in the interval, without overflow
-      U length = static_cast<U>(static_cast<U>(intv.second) - static_cast<U>(intv.first));
-      if (length >= trans_max_sequences)
-        throw std::invalid_argument("Transition expands to too many value sequences");
-      add_count(count, uint64_t(length) + 1);
+      add_count(count, fc4sc_type_traits<T>::interval_count(intv.first, intv.second, trans_max_sequences));
     }
     return count;
   }
@@ -1765,7 +1839,7 @@ public:
       for (size_t i = 0; i < step.values.size(); ++i)
       {
         if (i > 0) out += ",";
-        if (step.values[i].first == step.values[i].second)
+        if (fc4sc_type_traits<T>::equal(step.values[i].first, step.values[i].second))
           out += to_text(step.values[i].first);
         else
           out += "[" + to_text(step.values[i].first) + ":" + to_text(step.values[i].second) + "]";
@@ -1862,9 +1936,7 @@ public:
       step_values.push_back(std::vector<T>());
       for (auto &intv : step.values)
       {
-        const U last = static_cast<U>(static_cast<U>(intv.second) - static_cast<U>(intv.first));
-        for (uint64_t k = 0; k <= last; ++k)
-          step_values.back().push_back(static_cast<T>(static_cast<U>(static_cast<U>(intv.first) + k)));
+        fc4sc_type_traits<T>::enumerate_interval(intv.first, intv.second, step_values.back());
       }
     }
 
@@ -1944,14 +2016,14 @@ public:
     for (auto &seq : sequences)
     {
       sequences_int.push_back(std::vector<int>());
-      for (auto value : seq)
-        sequences_int.back().push_back(static_cast<int>(value));
+      for (const T& value : seq)
+        sequences_int.back().push_back(fc4sc_type_traits<T>::to_int(value));
     }
     for (auto &pattern : patterns)
     {
       sequences_int.push_back(std::vector<int>());
-      for (auto value : pattern.shortest)
-        sequences_int.back().push_back(static_cast<int>(value));
+      for (const T& value : pattern.shortest)
+        sequences_int.back().push_back(fc4sc_type_traits<T>::to_int(value));
     }
     return sequences_int;
   }
@@ -1963,16 +2035,28 @@ public:
     for (auto &seq : sequences)
     {
       sequences_dec.push_back(std::vector<std::string>());
-      for (auto value : seq)
+      for (const T& value : seq)
         sequences_dec.back().push_back(to_decimal(value));
     }
     for (auto &pattern : patterns)
     {
       sequences_dec.push_back(std::vector<std::string>());
-      for (auto value : pattern.shortest)
+      for (const T& value : pattern.shortest)
         sequences_dec.back().push_back(to_decimal(value));
     }
     return sequences_dec;
+  }
+
+  std::vector<xml_user_attr> get_user_attrs() const override
+  {
+    std::vector<xml_user_attr> attrs = bin_data_model<T>::get_user_attrs();
+    if (!fc4sc_type_traits<T>::has_xml_display_attrs) return attrs;
+    size_t idx = 0;
+    for (auto &seq : sequences)
+      fc4sc_type_traits<T>::append_seq_user_attrs(seq, idx++, attrs);
+    for (auto &pattern : patterns)
+      fc4sc_type_traits<T>::append_seq_user_attrs(pattern.shortest, idx++, attrs);
+    return attrs;
   }
 
   /*! Returns the sequence or the transition with a hit count, for the messages */
@@ -1980,10 +2064,12 @@ public:
   {
     if (index >= sequences.size())
       return patterns[index - sequences.size()].text;
-    std::stringstream ss;
-    for (size_t i = 0; i < sequences[index].size(); ++i)
-      ss << ((i == 0) ? "" : " => ") << sequences[index][i];
-    return ss.str();
+    std::string out;
+    for (size_t i = 0; i < sequences[index].size(); ++i) {
+      if (i > 0) out += " => ";
+      out += fc4sc_type_traits<T>::to_string(sequences[index][i]);
+    }
+    return out;
   }
 
   /*! The values of the steps of the transitions with goto or nonconsecutive repetitions */
@@ -2021,11 +2107,18 @@ public:
       pattern.step(value, sample, exclusions, window);
   }
 
+  struct TrieKeyComp {
+    bool operator()(const std::pair<size_t, T>& a, const std::pair<size_t, T>& b) const {
+      if (a.first != b.first) return a.first < b.first;
+      return fc4sc_type_traits<T>::less(a.second, b.second);
+    }
+  };
+
   /*!
    * Trie of the sequences, read from their last value to their first:
    * the child of a node for a value, by the node and the value
    */
-  std::map<std::pair<size_t, T>, size_t> trie;
+  std::map<std::pair<size_t, T>, size_t, TrieKeyComp> trie;
 
   /*! Index of the sequence which ends at a node of the trie, or -1 */
   std::vector<int> trie_sequence;
@@ -2122,7 +2215,7 @@ public:
 template <class T>
 class transition_bin : public bin<T>
 {
-  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  static_assert(fc4sc_type_traits<T>::is_supported, "Type is not supported by fc4sc!");
   friend class coverpoint<T>;
 
 protected:
@@ -2232,6 +2325,14 @@ public:
     if(this->valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
+    }
+    if (!cvp.cvp_data->in_ensure_bins_) {
+      if (this->bin_data->bin_type == bin_t::default_) {
+        cvp.prepare_explicit_bin();
+        cvp.record_transition_spec(*this);
+      } else {
+        cvp.invalidate_auto_bins();
+      }
     }
     if (!array) {
       add_single_to_cvp(cvp);
@@ -2350,7 +2451,7 @@ public:
   bool sequence = false;
 
   /*! Hit count of each value, for a bin array */
-  std::map<T, uint64_t> value_hits;
+  std::map<T, uint64_t, typename fc4sc_type_traits<T>::map_less_comp> value_hits;
 
   /*! Writes a value in decimal, a char type as a number */
   static std::string to_decimal(T value)
@@ -2393,16 +2494,12 @@ public:
   bool add_value_hits(const std::string& value, uint64_t count)
   {
     if (!array || value.empty()) return false;
-    typedef typename std::conditional<std::is_signed<T>::value, long long, unsigned long long>::type wide_t;
-    // the value must be written as to_decimal() writes it
-    std::istringstream in(value);
-    wide_t wide = 0;
-    if (!(in >> wide) || !in.eof() || to_decimal(static_cast<T>(wide)) != value)
+    T v{};
+    if (!fc4sc_type_traits<T>::from_ucis_integer(value, v) || to_decimal(v) != value)
       return false;
-    const T v = static_cast<T>(wide);
     for (size_t i = 0; i < this->intervals.size(); ++i)
     {
-      if (v < this->intervals[i].first || v > this->intervals[i].second) continue;
+      if (!fc4sc_type_traits<T>::in_interval(v, this->intervals[i].first, this->intervals[i].second)) continue;
       uint64_t& hits = this->interval_hits[i];
       uint64_t& value_hits_v = value_hits[v];
       const uint64_t max = std::numeric_limits<uint64_t>::max();
@@ -2414,23 +2511,10 @@ public:
   }
 };
 
-/*!
- * \brief Defines a class for default bins
- * \tparam T Type of values in this bin
- *
- *   A default bin holds the values of its coverpoint which are in no other
- * bin: no bin, illegal bin or ignore bin. The SystemVerilog
- * "bins others = default;" is written default_bin<int>("others"). As in
- * SystemVerilog, a default bin is not counted in the coverage of its
- * coverpoint, and a cross of the coverpoint does not see it: a sample
- * which only hits a default bin is a miss of the cross. Transition bins
- * do not change the values of a default bin. The UCIS XML file has the
- * bin as an ignore bin, so that readers of the file do not count it.
- */
 template <class T>
 class default_bin : public bin<T>
 {
-  static_assert(std::is_integral<T>::value, "Type must be integral!");
+  static_assert(fc4sc_type_traits<T>::is_supported, "Type is not supported by fc4sc!");
   friend class coverpoint<T>;
 
 protected:
@@ -2464,10 +2548,10 @@ protected:
     if (default_data()->sequence) return;
     auto& intervals = this->bin_data->intervals;
     auto it = std::upper_bound(intervals.begin(), intervals.end(), val,
-      [](const T& v, const interval_t<T>& intv) { return v < intv.first; });
+      [](const T& v, const interval_t<T>& intv) { return fc4sc_type_traits<T>::less(v, intv.first); });
     if (it == intervals.begin()) return;
     --it;
-    if (val > it->second) return;
+    if (fc4sc_type_traits<T>::less(it->second, val)) return;
     this->bin_data->interval_hits[it - intervals.begin()]++;
     if (default_data()->array)
       default_data()->value_hits[val]++;
@@ -2502,6 +2586,8 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    if (!cvp.cvp_data->in_ensure_bins_)
+      cvp.prepare_explicit_bin();
     cvp.default_bins.push_back(*this);
     cvp.cvp_data->default_bins_data.push_back(this->bin_data);
     cvp.update_default_bins();
@@ -2550,8 +2636,9 @@ public:
   explicit default_sequence_bin(const std::string &bin_name) : default_bin<T>(bin_name)
   {
     this->default_data()->sequence = true;
-    this->bin_data->intervals.assign(1, interval(std::numeric_limits<T>::min(),
-                                                 std::numeric_limits<T>::max()));
+    T lo{}, hi{};
+    fc4sc_type_traits<T>::auto_bin_bounds(lo, hi);
+    this->bin_data->intervals.assign(1, interval(lo, hi));
     this->bin_data->interval_hits.assign(1, 0);
   }
 

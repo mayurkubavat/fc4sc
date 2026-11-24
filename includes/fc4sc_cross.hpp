@@ -82,6 +82,8 @@ public:
 
   uint64_t size() const
   {
+    if (owner_ != nullptr && !in_ensure_bins_)
+      owner_->ensure_bins();
     uint64_t total = 1;
     for (auto& cvp : cross_cvps) 
     {
@@ -93,6 +95,8 @@ public:
   void accept_visitor(covVisitorBase& visitor)
   {
     sync_options_from_parent();
+    if (owner_ != nullptr && !in_ensure_bins_)
+      owner_->ensure_bins();
     visitor.visit(*this);
   }
 
@@ -120,6 +124,9 @@ class cross : public cross_base
   /*! Total number of bins in this cross */
   uint64_t total_coverpoints = 0;
 
+  mutable bool has_sampled_ = false;
+  mutable std::vector<uint64_t> cvp_epochs_;
+
   /*!
    *  \brief Create a dynamic copy of this cross with same type definition
    */
@@ -136,8 +143,12 @@ class cross : public cross_base
     }
     crs->crs_data->user_bins = this->crs_data->user_bins;
     crs->crs_data->auto_bins_size = this->crs_data->auto_bins_size;
-    for (auto &bin : crs->crs_data->user_bins)
+    for (auto &bin : crs->crs_data->user_bins) {
       bin.hits = 0;
+      if (bin.select)
+        bin.select = bin.select->resolve(crs->cvps_vec, &this->cvps_vec);
+    }
+    crs->build_cross_bins();
     return crs;
   }
 
@@ -174,7 +185,16 @@ class cross : public cross_base
    */
   void build_cross_bins()
   {
+    for (auto cvp : cvps_vec)
+      cvp->ensure_bins();
+    cvp_epochs_.clear();
+    for (auto cvp : cvps_vec)
+      cvp_epochs_.push_back(cvp->bins_epoch());
+
     auto& user_bins = crs_data->user_bins;
+    crs_data->auto_bins_size = 0;
+    for (auto &bin : user_bins)
+      bin.size = 0;
     if (user_bins.empty()) return;
 
     for (auto &bin : user_bins)
@@ -212,13 +232,28 @@ class cross : public cross_base
   }
 
   /*!
-   * \brief Calls build_cross_bins() and, if it throws, deletes the data of
-   * the cross, which no covergroup owns yet
+   * \brief Calls build_cross_bins() eagerly when no crossed coverpoint has
+   * deferred bins, or validates coverpoint membership and non-deferred binsof
+   * conditions while deferring full resolution until ensure_bins().
    */
-  void build_cross_bins_or_free()
+  void build_or_defer_cross_bins_or_free()
   {
     try {
-      build_cross_bins();
+      bool any_deferred = false;
+      for (auto* cvp : cvps_vec) {
+        if (cvp->has_deferred_bins()) {
+          any_deferred = true;
+          break;
+        }
+      }
+      if (!any_deferred) {
+        build_cross_bins();
+      } else {
+        for (auto& bin : crs_data->user_bins) {
+          if (bin.select)
+            bin.select->validate_non_deferred(cvps_vec);
+        }
+      }
     }
     catch (...) {
       delete crs_data;
@@ -328,15 +363,15 @@ class cross : public cross_base
   template <typename... Restrictions>
   cross(const std::string& name, coverpoint<Args> *... args, Restrictions... binsofs)
   {
+    this->crs_data->owner_ = this;
     this->crs_data->name = name;
 
-    total_coverpoints = get_size(args...);
     cvps_vec = std::vector<cvp_base*>{args...};
     for(auto cvp_it : cvps_vec) {
       crs_data->cross_cvps.push_back(cvp_it->get_data());
     }
     add_cross_bins(binsofs...);
-    build_cross_bins_or_free();
+    build_or_defer_cross_bins_or_free();
   };
 
 public:
@@ -354,13 +389,13 @@ public:
   template <typename... Restrictions>
   cross(cvg_base *n, coverpoint<Args> *... args, Restrictions... binsofs)
   {
-    total_coverpoints = get_size(args...);
+    this->crs_data->owner_ = this;
     cvps_vec = std::vector<cvp_base*>{args...};
     for(auto cvp_it : cvps_vec) {
       crs_data->cross_cvps.push_back(cvp_it->get_data());
     }
     add_cross_bins(binsofs...);
-    build_cross_bins_or_free();
+    build_or_defer_cross_bins_or_free();
 
     // registered once it is built: a cross which throws is not sampled
     n->cvps.push_back(this);
@@ -385,7 +420,48 @@ public:
   /*!
    *  \brief Default constructor
    */
-  cross(){}
+  cross(){
+    this->crs_data->owner_ = this;
+  }
+
+  ~cross() {
+    if (valid_data.use_count() > 0 && crs_data != nullptr && crs_data->owner_ == this) {
+      try {
+        ensure_bins();
+      } catch (...) {
+      }
+      crs_data->owner_ = nullptr;
+    }
+  }
+
+  void ensure_bins() const {
+    if (valid_data.use_count() == 0 || crs_data == nullptr) return;
+    if (crs_data->in_ensure_bins_ || has_sampled_) return;
+    struct Guard {
+      bool& flag;
+      explicit Guard(bool& f) : flag(f) { flag = true; }
+      ~Guard() { flag = false; }
+    } guard(crs_data->in_ensure_bins_);
+
+    for (size_t i = 0; i < cvps_vec.size(); ++i) {
+      if (i < crs_data->cross_cvps.size() && crs_data->cross_cvps[i]->owner_ == nullptr)
+        return;
+    }
+    for (auto* cvp : cvps_vec) {
+      if (cvp->get_data() != nullptr && cvp->get_data()->parent_cvg != nullptr &&
+          !cvp->get_data()->in_ensure_bins_)
+        cvp->get_data()->sync_options_from_parent();
+      cvp->ensure_bins();
+    }
+    bool changed = (cvp_epochs_.size() != cvps_vec.size());
+    for (size_t i = 0; !changed && i < cvps_vec.size(); ++i) {
+      if (cvps_vec[i]->bins_epoch() != cvp_epochs_[i])
+        changed = true;
+    }
+    if (changed) {
+      const_cast<cross<Args...>*>(this)->build_cross_bins();
+    }
+  }
 
   /*!
    *  \brief Sampling function at cross level
@@ -398,7 +474,9 @@ public:
     }
 
     crs_data->sync_options_from_parent();
+    ensure_bins();
     if (!this->collect) return;
+    has_sampled_ = true;
 
     // the bins hit by the sample, for each coverpoint
     std::vector<std::vector<size_t>> hit_bins;
@@ -448,6 +526,7 @@ public:
     }
 
     crs_data->sync_options_from_parent();
+    ensure_bins();
     if (inst_coverage_is_type_coverage(crs_data->parent_cvg))
       return this->get_coverage();
 
@@ -477,6 +556,7 @@ public:
     }
 
     crs_data->sync_options_from_parent();
+    ensure_bins();
     if (inst_coverage_is_type_coverage(crs_data->parent_cvg))
       return this->get_coverage(covered, total);
 
@@ -602,6 +682,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    ensure_bins();
 
     uint64_t total = 1;
     for (auto& cvp : cvps_vec) 
@@ -619,6 +700,7 @@ public:
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
     }
+    ensure_bins();
 
     return crs_data->bins;
   }

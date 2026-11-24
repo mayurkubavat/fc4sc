@@ -117,12 +117,16 @@ class binsof : public select_expression
   bool has_values = false;
   std::vector<interval_t<T>> values;
 
-  void add_value(const T& value) { values.push_back(interval_t<T>(value, value)); }
+  void add_value(const T& value)
+  {
+    const T v = fc4sc_type_traits<T>::validate_point(value);
+    values.push_back(interval_t<T>(v, v));
+  }
   void add_value(const interval_t<T>& intv)
   {
-    values.push_back((intv.first <= intv.second) ? intv : interval_t<T>(intv.second, intv.first));
+    values.push_back(fc4sc_type_traits<T>::validate_interval(intv.first, intv.second));
   }
-  void add_value(const std::vector<T>& vec) { for (auto &v : vec) add_value(v); }
+  void add_value(const std::vector<T>& vec) { for (const T& v : vec) add_value(v); }
   void add_value(const std::vector<interval_t<T>>& vec) { for (auto &v : vec) add_value(v); }
 
   void add_values() { }
@@ -136,20 +140,25 @@ class binsof : public select_expression
 
   bool has_value(T low, T high) const
   {
+    typedef fc4sc_type_traits<T> traits;
     for (auto &intv : values)
-      if (intv.first <= high && low <= intv.second)
+      if (traits::less_equal(intv.first, high) && traits::less_equal(low, intv.second))
         return true;
     return false;
   }
 
   /*! Returns which bins of the coverpoint this condition selects */
-  std::vector<bool> select_bins() const
+  std::vector<bool> select_bins(const cvp_base* target_cvp = nullptr) const
   {
-    std::vector<bool> selected(cvp->bins.size(), false);
+    const coverpoint<T>* target =
+        (target_cvp != nullptr) ? dynamic_cast<const coverpoint<T>*>(target_cvp) : cvp;
+    if (target == nullptr) target = cvp;
+    target->ensure_bins();
+    std::vector<bool> selected(target->bins.size(), false);
     bool found = false;
-    for (size_t i = 0; i < cvp->bins.size(); ++i)
+    for (size_t i = 0; i < target->bins.size(); ++i)
     {
-      bin_data_model<T>* data = cvp->bins[i].bin_data;
+      bin_data_model<T>* data = target->bins[i].bin_data;
       const std::string& name = data->name;
       if (!bin_name.empty() && name != bin_name &&
           name.compare(0, bin_name.size() + 1, bin_name + "[") != 0)
@@ -164,7 +173,7 @@ class binsof : public select_expression
       auto trans_data = dynamic_cast<transition_bin_data_model<T>*>(data);
       if (trans_data != nullptr) {
         for (auto &seq : trans_data->sequences)
-          for (auto value : seq)
+          for (const T& value : seq)
             selected[i] = selected[i] || has_value(value, value);
         for (auto &intv : trans_data->get_pattern_values())
           selected[i] = selected[i] || has_value(intv.first, intv.second);
@@ -173,15 +182,15 @@ class binsof : public select_expression
     if (!found) {
       // as in SystemVerilog, the ignore and illegal bins of a coverpoint
       // are not in its crosses
-      for (auto &bin : cvp->ignore_bins)
+      for (auto &bin : target->ignore_bins)
         if (bin.bin_data->name == bin_name)
           throw std::invalid_argument("binsof: " + bin_name + " is an ignore bin of coverpoint " +
-                                      cvp->name() + " and cannot be selected");
-      for (auto &bin : cvp->illegal_bins)
+                                      target->cvp_data->name + " and cannot be selected");
+      for (auto &bin : target->illegal_bins)
         if (bin.bin_data->name == bin_name)
           throw std::invalid_argument("binsof: " + bin_name + " is an illegal bin of coverpoint " +
-                                      cvp->name() + " and cannot be selected");
-      throw std::invalid_argument("binsof: no bin " + bin_name + " in coverpoint " + cvp->name());
+                                      target->cvp_data->name + " and cannot be selected");
+      throw std::invalid_argument("binsof: no bin " + bin_name + " in coverpoint " + target->cvp_data->name);
     }
     return selected;
   }
@@ -193,7 +202,9 @@ class binsof : public select_expression
     node->cvp = cvp;
     binsof<T> condition = *this;
     condition.node.reset();
-    node->select_bins = [condition]() { return condition.select_bins(); };
+    node->select_bins = [condition](const cvp_base* target_cvp) {
+      return condition.select_bins(target_cvp);
+    };
     this->node = node;
   }
 
