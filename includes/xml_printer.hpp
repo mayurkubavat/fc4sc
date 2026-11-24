@@ -606,7 +606,7 @@ public:
 
       if (hit != cross_bins.end())
         write_bin(indices, hit->second);
-      else if (base.user_bins.empty() || base.is_auto_bin(indices))
+      else if (!base.has_custom_auto_bins() || base.is_auto_bin(indices))
       {
         // a product of bins in a user defined bin is not a bin
         write_bin(indices, 0);
@@ -638,6 +638,26 @@ public:
     // them.
     for (auto &bin : base.user_bins)
     {
+      if (bin.bin_type == fc4sc::bin_t::default_bin_) {
+        if (bin.size == 0 && bin.hits == 0)
+          continue;
+        bins_written++;
+        stream << "<crossBin \n";
+        stream << "name=\"" << escape_xml_chars(bin.name) << "\"  \n";
+        stream << "key=\"" << get_unique_key() << "\" \n";
+        stream << "type=\"ignore\" \n";
+        stream << "> \n";
+
+        for (size_t i = 0; i < sizes.size(); i++)
+          stream << "<index>" << -1 << "</index>\n";
+
+        stream << "<contents \n";
+        stream << "coverageCount=\"" << bin.hits << "\"> \n";
+        stream << "</contents> \n";
+
+        stream << "</crossBin> \n";
+        continue;
+      }
       if (bin.bin_type != fc4sc::bin_t::default_ || bin.size == 0)
         continue;
       bins_written++;

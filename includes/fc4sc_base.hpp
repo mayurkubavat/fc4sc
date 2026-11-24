@@ -47,8 +47,10 @@
 #include <unordered_map>
 #include <assert.h>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <type_traits>
+#include <typeinfo>
 
 #include "fc4sc_options.hpp"
 #include "fc4sc_type_traits.hpp"
@@ -195,6 +197,107 @@ template<typename forbidden, typename first> struct forbid_type<forbidden, first
         CREATE_WRAP_F(sample_expr, fc4sc::detail::decay_t<type>), #sample_expr, \
         CREATE_WRAP_F(sample_cond, bool), #sample_cond) =
 
+#define FC4SC_CAT_IMPL(a, b) a##b
+#define FC4SC_CAT(a, b) FC4SC_CAT_IMPL(a, b)
+#define FC4SC_EXPAND(x) x
+#define FC4SC_UNPAREN(...) __VA_ARGS__
+
+#define CG_EXTEND_DECL(type, base_type, args...) \
+  using base_type::sample; \
+  type(std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, fc4sc::global* cntxt = fc4sc::global::getter(), ##args)
+
+#define CG_EXTEND_DEF(type, base_type, args...) \
+  type::type(std::string inst_name, const char *auto_inst_file_name, int auto_line, fc4sc::global* cntxt, ##args) \
+    : base_type(fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__)), auto_inst_file_name, auto_line, cntxt)
+
+#define CG_EXTEND_BASE_DEF(type, base_type, base_args, args...) \
+  type::type(std::string inst_name, const char *auto_inst_file_name, int auto_line, fc4sc::global* cntxt, ##args) \
+    : base_type(fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__)), auto_inst_file_name, auto_line, cntxt, FC4SC_UNPAREN base_args)
+
+#define CG_EXTEND(type, base_type, args...) \
+  using base_type::sample; \
+  type(std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, fc4sc::global* cntxt = fc4sc::global::getter(), ##args) \
+    : base_type(fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__)), auto_inst_file_name, auto_line, cntxt)
+
+#define CG_EXTEND_BASE(type, base_type, base_args, args...) \
+  using base_type::sample; \
+  type(std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, fc4sc::global* cntxt = fc4sc::global::getter(), ##args) \
+    : base_type(fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__)), auto_inst_file_name, auto_line, cntxt, FC4SC_UNPAREN base_args)
+
+#define CG_SCOPED_EXTEND_DECL(type, base_type, scp_type, args...) \
+  using base_type::sample; \
+  type(fc4sc::scp_base& scp, std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, ##args)
+
+#define CG_SCOPED_EXTEND_DEF(type, base_type, scp_type, args...) \
+  scp_type::type::type(fc4sc::scp_base& scp, std::string inst_name, const char *auto_inst_file_name, int auto_line, ##args) \
+    : base_type(scp, fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__, scp_type::scp_type_name().c_str())), auto_inst_file_name, auto_line)
+
+#define CG_SCOPED_EXTEND_BASE_DEF(type, base_type, scp_type, base_args, args...) \
+  scp_type::type::type(fc4sc::scp_base& scp, std::string inst_name, const char *auto_inst_file_name, int auto_line, ##args) \
+    : base_type(scp, fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__, scp_type::scp_type_name().c_str())), auto_inst_file_name, auto_line, FC4SC_UNPAREN base_args)
+
+#define CG_SCOPED_EXTEND(type, base_type, scp_type, args...) \
+  using base_type::sample; \
+  type(fc4sc::scp_base& scp, std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, ##args) \
+    : base_type(scp, fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__, scp_type::scp_type_name().c_str())), auto_inst_file_name, auto_line)
+
+#define CG_SCOPED_EXTEND_BASE(type, base_type, scp_type, base_args, args...) \
+  using base_type::sample; \
+  type(fc4sc::scp_base& scp, std::string inst_name = "", const char *auto_inst_file_name = "", int auto_line = 1, ##args) \
+    : base_type(scp, fc4sc::detail::forward_derived_type(inst_name, fc4sc::detail::derived_type_guard(#type, __FILE__, __LINE__, scp_type::scp_type_name().c_str())), auto_inst_file_name, auto_line, FC4SC_UNPAREN base_args)
+
+#define CG_IFF(expr) \
+  bool FC4SC_CAT(fc4sc_iff_init_, __LINE__) = this->add_iff_init([&]() -> bool { return static_cast<bool>(expr); }, #expr)
+
+#define CROSS_IFF(expr) \
+  fc4sc::cross_iff([&]() -> bool { return static_cast<bool>(expr); })
+
+#define FC4SC_NARGS_IMPL(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,N,...) N
+#define FC4SC_NARGS(...) FC4SC_EXPAND(FC4SC_NARGS_IMPL(__VA_ARGS__,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0))
+
+#define FC4SC_SCG_P1(m1) const fc4sc::detail::decay_t<decltype(m1)>& _fc4sc_arg_1
+#define FC4SC_SCG_P2(m1, m2) FC4SC_SCG_P1(m1), const fc4sc::detail::decay_t<decltype(m2)>& _fc4sc_arg_2
+#define FC4SC_SCG_P3(m1, m2, m3) FC4SC_SCG_P2(m1, m2), const fc4sc::detail::decay_t<decltype(m3)>& _fc4sc_arg_3
+#define FC4SC_SCG_P4(m1, m2, m3, m4) FC4SC_SCG_P3(m1, m2, m3), const fc4sc::detail::decay_t<decltype(m4)>& _fc4sc_arg_4
+#define FC4SC_SCG_P5(m1, m2, m3, m4, m5) FC4SC_SCG_P4(m1, m2, m3, m4), const fc4sc::detail::decay_t<decltype(m5)>& _fc4sc_arg_5
+#define FC4SC_SCG_P6(m1, m2, m3, m4, m5, m6) FC4SC_SCG_P5(m1, m2, m3, m4, m5), const fc4sc::detail::decay_t<decltype(m6)>& _fc4sc_arg_6
+#define FC4SC_SCG_P7(m1, m2, m3, m4, m5, m6, m7) FC4SC_SCG_P6(m1, m2, m3, m4, m5, m6), const fc4sc::detail::decay_t<decltype(m7)>& _fc4sc_arg_7
+#define FC4SC_SCG_P8(m1, m2, m3, m4, m5, m6, m7, m8) FC4SC_SCG_P7(m1, m2, m3, m4, m5, m6, m7), const fc4sc::detail::decay_t<decltype(m8)>& _fc4sc_arg_8
+#define FC4SC_SCG_P9(m1, m2, m3, m4, m5, m6, m7, m8, m9) FC4SC_SCG_P8(m1, m2, m3, m4, m5, m6, m7, m8), const fc4sc::detail::decay_t<decltype(m9)>& _fc4sc_arg_9
+#define FC4SC_SCG_P10(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10) FC4SC_SCG_P9(m1, m2, m3, m4, m5, m6, m7, m8, m9), const fc4sc::detail::decay_t<decltype(m10)>& _fc4sc_arg_10
+#define FC4SC_SCG_P11(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11) FC4SC_SCG_P10(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10), const fc4sc::detail::decay_t<decltype(m11)>& _fc4sc_arg_11
+#define FC4SC_SCG_P12(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12) FC4SC_SCG_P11(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11), const fc4sc::detail::decay_t<decltype(m12)>& _fc4sc_arg_12
+#define FC4SC_SCG_P13(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13) FC4SC_SCG_P12(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12), const fc4sc::detail::decay_t<decltype(m13)>& _fc4sc_arg_13
+#define FC4SC_SCG_P14(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14) FC4SC_SCG_P13(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13), const fc4sc::detail::decay_t<decltype(m14)>& _fc4sc_arg_14
+#define FC4SC_SCG_P15(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15) FC4SC_SCG_P14(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14), const fc4sc::detail::decay_t<decltype(m15)>& _fc4sc_arg_15
+#define FC4SC_SCG_P16(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16) FC4SC_SCG_P15(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15), const fc4sc::detail::decay_t<decltype(m16)>& _fc4sc_arg_16
+
+#define FC4SC_SCG_A1(m1) this->m1 = _fc4sc_arg_1;
+#define FC4SC_SCG_A2(m1, m2) FC4SC_SCG_A1(m1) this->m2 = _fc4sc_arg_2;
+#define FC4SC_SCG_A3(m1, m2, m3) FC4SC_SCG_A2(m1, m2) this->m3 = _fc4sc_arg_3;
+#define FC4SC_SCG_A4(m1, m2, m3, m4) FC4SC_SCG_A3(m1, m2, m3) this->m4 = _fc4sc_arg_4;
+#define FC4SC_SCG_A5(m1, m2, m3, m4, m5) FC4SC_SCG_A4(m1, m2, m3, m4) this->m5 = _fc4sc_arg_5;
+#define FC4SC_SCG_A6(m1, m2, m3, m4, m5, m6) FC4SC_SCG_A5(m1, m2, m3, m4, m5) this->m6 = _fc4sc_arg_6;
+#define FC4SC_SCG_A7(m1, m2, m3, m4, m5, m6, m7) FC4SC_SCG_A6(m1, m2, m3, m4, m5, m6) this->m7 = _fc4sc_arg_7;
+#define FC4SC_SCG_A8(m1, m2, m3, m4, m5, m6, m7, m8) FC4SC_SCG_A7(m1, m2, m3, m4, m5, m6, m7) this->m8 = _fc4sc_arg_8;
+#define FC4SC_SCG_A9(m1, m2, m3, m4, m5, m6, m7, m8, m9) FC4SC_SCG_A8(m1, m2, m3, m4, m5, m6, m7, m8) this->m9 = _fc4sc_arg_9;
+#define FC4SC_SCG_A10(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10) FC4SC_SCG_A9(m1, m2, m3, m4, m5, m6, m7, m8, m9) this->m10 = _fc4sc_arg_10;
+#define FC4SC_SCG_A11(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11) FC4SC_SCG_A10(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10) this->m11 = _fc4sc_arg_11;
+#define FC4SC_SCG_A12(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12) FC4SC_SCG_A11(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11) this->m12 = _fc4sc_arg_12;
+#define FC4SC_SCG_A13(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13) FC4SC_SCG_A12(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12) this->m13 = _fc4sc_arg_13;
+#define FC4SC_SCG_A14(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14) FC4SC_SCG_A13(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13) this->m14 = _fc4sc_arg_14;
+#define FC4SC_SCG_A15(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15) FC4SC_SCG_A14(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14) this->m15 = _fc4sc_arg_15;
+#define FC4SC_SCG_A16(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16) FC4SC_SCG_A15(m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15) this->m16 = _fc4sc_arg_16;
+
+#define FC4SC_SAMPLE_CG_N(N, ...) \
+  virtual void sample(FC4SC_EXPAND(FC4SC_CAT(FC4SC_SCG_P, N)(__VA_ARGS__))) { \
+    FC4SC_EXPAND(FC4SC_CAT(FC4SC_SCG_A, N)(__VA_ARGS__)) \
+    fc4sc::covergroup::sample(); \
+  }
+
+#define FC4SC_SAMPLE_CG_DISPATCH(N, ...) FC4SC_SAMPLE_CG_N(N, __VA_ARGS__)
+#define SAMPLE_CG(...) FC4SC_SAMPLE_CG_DISPATCH(FC4SC_NARGS(__VA_ARGS__), __VA_ARGS__)
+
 // global var for type name and instance name of default scopes
 // covergroups that are not associated with user-defined scopes automatically are associated with the default scope
 #define _FC4SC_DEFAULT_SCOPE_TYPE_ "default_scope"
@@ -206,6 +309,194 @@ template<typename forbidden, typename first> struct forbid_type<forbidden, first
  */
 namespace fc4sc
 {
+namespace detail {
+
+template <size_t... I>
+struct index_seq {};
+
+template <size_t N, size_t... I>
+struct make_index_seq_impl : make_index_seq_impl<N - 1, N - 1, I...> {};
+
+template <size_t... I>
+struct make_index_seq_impl<0, I...> {
+  typedef index_seq<I...> type;
+};
+
+template <size_t N>
+using make_index_seq = typename make_index_seq_impl<N>::type;
+
+template <typename F, typename Tuple, size_t... I>
+inline auto apply_tuple_impl(F&& f, Tuple&& t, index_seq<I...>)
+    -> decltype(std::forward<F>(f)(std::get<I>(std::forward<Tuple>(t))...)) {
+  return std::forward<F>(f)(std::get<I>(std::forward<Tuple>(t))...);
+}
+
+template <typename F, typename Tuple>
+inline auto apply_tuple(F&& f, Tuple&& t)
+    -> decltype(apply_tuple_impl(std::forward<F>(f), std::forward<Tuple>(t),
+                                 make_index_seq<std::tuple_size<decay_t<Tuple>>::value>())) {
+  return apply_tuple_impl(std::forward<F>(f), std::forward<Tuple>(t),
+                          make_index_seq<std::tuple_size<decay_t<Tuple>>::value>());
+}
+
+template <typename F, typename Tuple, typename Seq = make_index_seq<std::tuple_size<Tuple>::value>>
+struct is_tuple_unpack_invocable;
+
+template <typename F, typename Tuple, size_t... I>
+struct is_tuple_unpack_invocable<F, Tuple, index_seq<I...>> {
+  template <typename G>
+  static auto test(int)
+      -> decltype(static_cast<bool>(std::declval<G>()(std::declval<const typename std::tuple_element<I, Tuple>::type&>()...)),
+                  std::true_type());
+  template <typename>
+  static std::false_type test(...);
+  static constexpr bool value = decltype(test<F>(0))::value;
+};
+
+template <typename F, typename Tuple>
+struct is_tuple_arg_invocable {
+  template <typename G>
+  static auto test(int)
+      -> decltype(static_cast<bool>(std::declval<G>()(std::declval<const Tuple&>())),
+                  std::true_type());
+  template <typename>
+  static std::false_type test(...);
+  static constexpr bool value = decltype(test<F>(0))::value;
+};
+
+template <typename... Args, typename F,
+          typename std::enable_if<is_tuple_unpack_invocable<F, std::tuple<Args...>>::value, int>::type = 0>
+inline std::function<bool(const void*)> wrap_cross_predicate(F pred) {
+  return [pred](const void* ptr) -> bool {
+    const auto* tup = static_cast<const std::tuple<Args...>*>(ptr);
+    return static_cast<bool>(apply_tuple(pred, *tup));
+  };
+}
+
+template <typename... Args, typename F,
+          typename std::enable_if<!is_tuple_unpack_invocable<F, std::tuple<Args...>>::value &&
+                                  is_tuple_arg_invocable<F, std::tuple<Args...>>::value, int>::type = 0>
+inline std::function<bool(const void*)> wrap_cross_predicate(F pred) {
+  return [pred](const void* ptr) -> bool {
+    const auto* tup = static_cast<const std::tuple<Args...>*>(ptr);
+    return static_cast<bool>(pred(*tup));
+  };
+}
+
+template <typename... Args>
+struct cross_tuple_traits {
+  static const std::type_info* type() { return &typeid(std::tuple<Args...>); }
+  template <typename F>
+  static std::function<bool(const void*)> wrap(F pred) {
+    return wrap_cross_predicate<Args...>(std::move(pred));
+  }
+};
+
+template <typename T>
+struct callable_sig;
+
+template <typename R, typename... Args>
+struct callable_sig<R(*)(Args...)> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename C, typename R, typename... Args>
+struct callable_sig<R(C::*)(Args...) const> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename C, typename R, typename... Args>
+struct callable_sig<R(C::*)(Args...)> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename R, typename... Args>
+struct callable_sig<R(*)(const std::tuple<Args...>&)> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename R, typename... Args>
+struct callable_sig<R(*)(std::tuple<Args...>)> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename C, typename R, typename... Args>
+struct callable_sig<R(C::*)(const std::tuple<Args...>&) const> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename C, typename R, typename... Args>
+struct callable_sig<R(C::*)(const std::tuple<Args...>&)> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename C, typename R, typename... Args>
+struct callable_sig<R(C::*)(std::tuple<Args...>) const> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename C, typename R, typename... Args>
+struct callable_sig<R(C::*)(std::tuple<Args...>)> : cross_tuple_traits<decay_t<Args>...> {};
+
+template <typename F>
+struct callable_traits : callable_sig<decltype(&decay_t<F>::operator())> {};
+
+template <typename R, typename... Args>
+struct callable_traits<R(*)(Args...)> : callable_sig<R(*)(Args...)> {};
+
+template <typename R, typename... Args>
+struct callable_traits<R(&)(Args...)> : callable_sig<R(*)(Args...)> {};
+
+template <typename R, typename... Args>
+struct callable_traits<std::function<R(Args...)>> : callable_sig<R(*)(Args...)> {};
+
+struct derived_type_info {
+  const char* type_name;
+  const char* file_name;
+  int line;
+  const char* scp_type_name;
+  bool active;
+  int depth;
+};
+
+inline derived_type_info& current_derived_type_info() {
+  static thread_local derived_type_info info = {nullptr, nullptr, 0, nullptr, false, 0};
+  return info;
+}
+
+class derived_type_guard {
+public:
+  derived_type_guard(const char* type_name, const char* file_name, int line,
+                     const char* scp_type_name = nullptr)
+      : prev_(current_derived_type_info()), applied_(false) {
+    derived_type_info& info = current_derived_type_info();
+    if (info.depth == 0 || !info.active) {
+      info.type_name = type_name;
+      info.file_name = file_name;
+      info.line = line;
+      info.scp_type_name = scp_type_name;
+      info.active = true;
+      applied_ = true;
+    }
+    ++info.depth;
+  }
+
+  derived_type_guard(const derived_type_guard&) = delete;
+  derived_type_guard& operator=(const derived_type_guard&) = delete;
+
+  ~derived_type_guard() {
+    derived_type_info& info = current_derived_type_info();
+    if (applied_) {
+      info = prev_;
+    } else {
+      --info.depth;
+      if (info.depth <= 0) {
+        info.depth = 0;
+        info.active = false;
+        info.type_name = nullptr;
+        info.file_name = nullptr;
+        info.line = 0;
+        info.scp_type_name = nullptr;
+      }
+    }
+  }
+
+private:
+  derived_type_info prev_;
+  bool applied_;
+};
+
+inline const std::string& forward_derived_type(const std::string& inst_name,
+                                               const derived_type_guard&) {
+  return inst_name;
+}
+
+} // namespace detail
+
 using cvp_metadata_t = std::tuple<void*, std::string, std::string>;
 
 class covVisitorBase;
@@ -590,6 +881,12 @@ public:
   /*! Whether bin definitions depend on post-ctor options (auto_bin_max / distribute_first) */
   virtual bool has_deferred_bins() const { return false; }
 
+  /*! Hook invoked when parent covergroup is sampled while stopped */
+  virtual void on_stopped_sample() {}
+
+  /*! Whether this coverpoint or cross is currently collecting samples */
+  virtual bool is_collecting() const { return true; }
+
   /*! Epoch counter incremented whenever coverpoint bins are rebuilt */
   virtual uint64_t bins_epoch() const { return 0; }
 
@@ -745,14 +1042,14 @@ class cross_select_node
 public:
 
   /*! Kind of the node */
-  enum op_t { condition_, not_, and_, or_ };
+  enum op_t { condition_, not_, and_, or_, all_, with_, queue_ };
 
   op_t op = condition_;
 
-  /*! Operands of !, && and || */
+  /*! Operands of !, &&, || and with_ */
   std::shared_ptr<const cross_select_node> lhs, rhs;
 
-  /*! Coverpoint of a condition */
+  /*! Coverpoint of a condition or single-coverpoint with_ */
   const cvp_base* cvp = nullptr;
 
   /*! Returns which bins of the coverpoint a condition selects */
@@ -764,20 +1061,126 @@ public:
   /*! Bins of the coverpoint selected by a condition, once resolved */
   std::vector<bool> bins;
 
+  /*! Value-level predicate on a single coverpoint (binsof<T>.with) */
+  std::function<bool(const void*)> single_cvp_pred;
+
+  /*! Value-tuple predicate (cross_bin.with / select_expression.with) */
+  std::function<bool(const void*)> tuple_pred;
+
+  /*! Runtime type of std::tuple<Args...> for tuple_pred and queue_ */
+  const std::type_info* tuple_type = nullptr;
+
+  /*! Sorted CrossQueueType membership predicate */
+  std::function<bool(const void*)> queue_contains;
+
+  /*! Resolves CrossQueueType into bin-index products and matched tuple count */
+  std::function<std::vector<std::vector<size_t>>(
+      const std::vector<cvp_base*>&,
+      const std::function<bool(const void*)>&,
+      uint64_t&)> queue_hit_products;
+
+  /*! Evaluates finite CrossQueueType tuples with custom accept predicate (returns accepted tuple count) */
+  std::function<uint64_t(
+      const std::vector<cvp_base*>&,
+      const std::function<bool(const std::vector<size_t>&, const void*, const void* const*)>&)> queue_count_tuples;
+
+  /*! Sorted unique bin-index products reachable by queue_, once resolved */
+  std::vector<std::vector<size_t>> queue_products;
+
+  bool has_with_node() const
+  {
+    if (op == with_) return true;
+    if (lhs && lhs->has_with_node()) return true;
+    if (rhs && rhs->has_with_node()) return true;
+    return false;
+  }
+
+  bool has_queue_node() const
+  {
+    if (op == queue_) return true;
+    if (lhs && lhs->has_queue_node()) return true;
+    if (rhs && rhs->has_queue_node()) return true;
+    return false;
+  }
+
+  bool is_pure_queue_node() const
+  {
+    return op == queue_;
+  }
+
+  const cross_select_node* get_underlying_queue_node() const
+  {
+    if (op == queue_) return this;
+    if (op == with_ && lhs) return lhs->get_underlying_queue_node();
+    return nullptr;
+  }
+
+  void validate_tuple_type(const std::type_info* expected) const
+  {
+    if (tuple_type != nullptr && expected != nullptr && *tuple_type != *expected) {
+      throw std::invalid_argument("cross select expression or CrossQueueType tuple type does not match cross coverpoint types");
+    }
+    if (lhs) lhs->validate_tuple_type(expected);
+    if (rhs) rhs->validate_tuple_type(expected);
+  }
+
   /*!
-   * \brief Checks if a product of bins is selected
+   * \brief Checks if a product of bins is structurally selected
    * \param product The index of a bin of each crossed coverpoint
    */
   bool matches(const std::vector<size_t>& product) const
   {
     switch (op)
     {
+      case all_: return true;
       case not_: return !lhs->matches(product);
       case and_: return lhs->matches(product) && rhs->matches(product);
       case or_: return lhs->matches(product) || rhs->matches(product);
+      case with_: return lhs ? lhs->matches(product) : true;
+      case queue_:
+        return std::binary_search(queue_products.begin(), queue_products.end(), product);
       default:
         return position < product.size() && product[position] < bins.size() &&
                bins[product[position]];
+    }
+  }
+
+  /*!
+   * \brief Checks if a value tuple (and its bin product) is selected
+   */
+  bool matches_tuple(const std::vector<size_t>& product,
+                     const void* tuple_ptr,
+                     const void* const* elem_ptrs) const
+  {
+    switch (op)
+    {
+      case all_: return true;
+      case not_: return !lhs->matches_tuple(product, tuple_ptr, elem_ptrs);
+      case and_:
+        return lhs->matches_tuple(product, tuple_ptr, elem_ptrs) &&
+               rhs->matches_tuple(product, tuple_ptr, elem_ptrs);
+      case or_:
+        return lhs->matches_tuple(product, tuple_ptr, elem_ptrs) ||
+               rhs->matches_tuple(product, tuple_ptr, elem_ptrs);
+      case with_:
+        if (lhs && !lhs->matches_tuple(product, tuple_ptr, elem_ptrs))
+          return false;
+        if (single_cvp_pred) {
+          if (elem_ptrs == nullptr || position >= product.size() || elem_ptrs[position] == nullptr)
+            return true;
+          return single_cvp_pred(elem_ptrs[position]);
+        }
+        if (tuple_pred) {
+          if (tuple_ptr == nullptr) return true;
+          return tuple_pred(tuple_ptr);
+        }
+        return true;
+      case queue_:
+        if (tuple_ptr != nullptr && queue_contains)
+          return matches(product) && queue_contains(tuple_ptr);
+        return matches(product);
+      default:
+        return matches(product);
     }
   }
 
@@ -788,12 +1191,47 @@ public:
    */
   std::shared_ptr<const cross_select_node> resolve(
       const std::vector<cvp_base*>& cvps,
-      const std::vector<cvp_base*>* orig_cvps = nullptr) const
+      const std::vector<cvp_base*>* orig_cvps = nullptr,
+      const std::function<bool(const void*)>* cross_with_pred = nullptr) const
   {
     std::shared_ptr<cross_select_node> node = std::make_shared<cross_select_node>(*this);
-    if (op != condition_) {
-      node->lhs = lhs->resolve(cvps, orig_cvps);
-      if (rhs) node->rhs = rhs->resolve(cvps, orig_cvps);
+    if (op == all_) {
+      return node;
+    }
+    if (op == not_ || op == and_ || op == or_) {
+      node->lhs = lhs->resolve(cvps, orig_cvps, cross_with_pred);
+      if (rhs) node->rhs = rhs->resolve(cvps, orig_cvps, cross_with_pred);
+      return node;
+    }
+    if (op == with_) {
+      if (lhs) node->lhs = lhs->resolve(cvps, orig_cvps, cross_with_pred);
+      if (single_cvp_pred) {
+        const cvp_base* target_cvp = cvp;
+        if (orig_cvps != nullptr && orig_cvps->size() == cvps.size()) {
+          auto oit = std::find(orig_cvps->begin(), orig_cvps->end(), cvp);
+          if (oit != orig_cvps->end()) {
+            target_cvp = cvps[static_cast<size_t>(oit - orig_cvps->begin())];
+            node->cvp = target_cvp;
+          }
+        }
+        auto it = std::find(cvps.begin(), cvps.end(), target_cvp);
+        if (it == cvps.end())
+          throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
+        node->position = static_cast<size_t>(it - cvps.begin());
+      }
+      return node;
+    }
+    if (op == queue_) {
+      if (queue_hit_products) {
+        uint64_t dummy = 0;
+        std::function<bool(const void*)> empty_pred;
+        node->queue_products = queue_hit_products(
+            cvps, cross_with_pred ? *cross_with_pred : empty_pred, dummy);
+        std::sort(node->queue_products.begin(), node->queue_products.end());
+        node->queue_products.erase(
+            std::unique(node->queue_products.begin(), node->queue_products.end()),
+            node->queue_products.end());
+      }
       return node;
     }
     const cvp_base* target_cvp = cvp;
@@ -814,9 +1252,19 @@ public:
 
   void validate_non_deferred(const std::vector<cvp_base*>& cvps) const
   {
-    if (op != condition_) {
+    if (op == all_ || op == queue_) return;
+    if (op == not_ || op == and_ || op == or_) {
       lhs->validate_non_deferred(cvps);
       if (rhs) rhs->validate_non_deferred(cvps);
+      return;
+    }
+    if (op == with_) {
+      if (lhs) lhs->validate_non_deferred(cvps);
+      if (single_cvp_pred && cvp != nullptr) {
+        auto it = std::find(cvps.begin(), cvps.end(), cvp);
+        if (it == cvps.end())
+          throw std::invalid_argument("binsof refers to a coverpoint which is not in the cross");
+      }
       return;
     }
     auto it = std::find(cvps.begin(), cvps.end(), cvp);
@@ -849,6 +1297,9 @@ public:
 
   /*! Select expression of the bin */
   std::shared_ptr<const cross_select_node> select;
+
+  /*! Optional per-bin iff guard */
+  std::function<bool()> iff_cond;
 
   /*!
    * Number of products of bins in the bin. The products of an ignore
@@ -897,6 +1348,28 @@ public:
   /*! Number of automatically created bins, when there are user_bins */
   uint64_t auto_bins_size = 0;
 
+  /*! Whether auto bins are filtered by user_bins or cross-level with() */
+  bool has_bin_filter_ = false;
+
+  /*! Whether this cross contains at least one default_cross_bin */
+  bool has_default_bin_ = false;
+
+  /*! Cached products excluded from automatically created bins */
+  std::set<std::vector<size_t>> excluded_auto_products_;
+
+  bool has_default_bin() const
+  {
+    if (has_default_bin_) return true;
+    for (const auto& b : user_bins)
+      if (b.bin_type == default_bin_) return true;
+    return false;
+  }
+
+  bool has_custom_auto_bins() const
+  {
+    return has_bin_filter_ || !user_bins.empty();
+  }
+
   /*! Get cross bins */
   virtual const std::map<std::vector<size_t>, uint64_t>& get_cross_bins() const = 0;
 
@@ -909,28 +1382,33 @@ public:
 
   /*!
    * \brief Checks if a product of bins is an automatically created bin,
-   * which is in no user defined bin, ignore bin or illegal bin
+   * which is in no user defined bin, ignore bin, illegal bin, or default bin
    * \param product The index of a bin of each crossed coverpoint
    */
   bool is_auto_bin(const std::vector<size_t>& product) const
   {
-    for (auto &bin : user_bins)
-      if (bin.select->matches(product))
+    if (has_default_bin()) return false;
+    if (has_bin_filter_)
+      return excluded_auto_products_.count(product) == 0;
+    for (auto &bin : user_bins) {
+      if (bin.bin_type == default_bin_) return false;
+      if (bin.select && bin.select->matches(product))
         return false;
+    }
     return true;
   }
 
   /*!
    * \brief Counts the bins of the cross which are in its coverage: the
    * automatically created bins and the user defined bins which have
-   * products of bins, without the ignore and illegal bins
+   * products of bins, without the ignore, illegal, and default bins
    * \param covered Returns the number of bins hit at least option.at_least times
    * \param total Returns the number of bins
    */
   void get_coverage_bins(int &covered, int &total) const
   {
     covered = 0;
-    if (user_bins.empty()) {
+    if (!has_custom_auto_bins()) {
       total = 1;
       for (auto cvp : cross_cvps)
         total *= cvp->size();
@@ -993,6 +1471,13 @@ public:
 
   /*! Indicator for optional covergroup */
   bool enable = true;
+
+  /*! Independent covergroup collection switch controlled by covergroup::start()/stop() */
+  bool collect = true;
+
+  /*! Optional covergroup sampling guard (iff) */
+  std::function<bool()> iff_cond;
+  std::string iff_cond_str;
 
   /*! Vector of pointers to coverpoints/crosses of the covergroup */
   std::vector<cvp_base_data_model*> cvps;
@@ -1072,6 +1557,12 @@ public:
 
   /*! Indictor if covergorup is enabled */
   virtual bool is_enabled() const = 0;
+
+  /*! Evaluate covergroup iff guard (returns true when unset) */
+  virtual bool eval_iff() const { return true; }
+
+  /*! Whether a covergroup iff guard is configured */
+  virtual bool has_iff() const { return false; }
 
   /*! Register coverpoint to covergroup */
   virtual void register_cvp(cvp_base* const cvp) {
