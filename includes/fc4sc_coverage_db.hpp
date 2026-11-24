@@ -635,20 +635,171 @@ inline std::vector<std::string> decimal_list(const xml_node& node, const std::st
  */
 inline void insert_child(xml_node& parent, std::unique_ptr<xml_node> child)
 {
-  // the order of the elements in their parents, in the UCIS schema
-  static const char* order[] = {
-    "sourceFiles", "historyNodes", "instanceCoverages", "designParameter", "id",
-    "covergroupCoverage", "cgInstance", "options", "cgId", "cgParms", "coverpoint",
-    "cross", "crossExpr", "crossBin", "coverpointBin", "range", "sequence", "index",
-    "contents", "seqValue"
+  auto rank_in = [](const char* const* list, size_t n, const std::string& name) -> size_t {
+    for (size_t i = 0; i < n; ++i)
+      if (name == list[i]) return i;
+    return n;
   };
-  const size_t count = sizeof(order) / sizeof(order[0]);
-  auto rank = [&](const std::string& name) {
-    for (size_t i = 0; i < count; ++i)
-      if (name == order[i]) return i;
-    // userAttr and unknown elements come last
-    return count;
+
+  auto rank = [&](const std::string& name) -> size_t {
+    if (parent.name == "UCIS") {
+      static const char* const seq[] = {"sourceFiles", "historyNodes", "instanceCoverages"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "instanceCoverages") {
+      static const char* const seq[] = {
+        "designParameter", "id", "toggleCoverage", "blockCoverage",
+        "conditionCoverage", "branchCoverage", "fsmCoverage",
+        "assertionCoverage", "covergroupCoverage", "userAttr"
+      };
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "toggleCoverage") {
+      static const char* const seq[] = {"toggleObject", "metricMode", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "toggleObject") {
+      static const char* const seq[] = {"dimension", "id", "toggleBit", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "toggleBit") {
+      static const char* const seq[] = {"index", "toggle", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "toggle") {
+      static const char* const seq[] = {"bin"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "blockCoverage") {
+      static const char* const seq[] = {"process", "block", "statement", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "process") {
+      static const char* const seq[] = {"block", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "block" || parent.name == "hierarchicalBlock") {
+      static const char* const seq[] = {"statementId", "hierarchicalBlock", "blockBin", "blockId", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "conditionCoverage") {
+      static const char* const seq[] = {"expr", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "expr" || parent.name == "hierarchicalExpr") {
+      static const char* const seq[] = {"id", "subExpr", "bin", "hierarchicalExpr", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "branchCoverage") {
+      static const char* const seq[] = {"statement", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "statement") {
+      static const char* const seq[] = {"id", "bin", "branch", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "nestedBranch") {
+      static const char* const seq[] = {"id", "branch", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "branch") {
+      static const char* const seq[] = {"id", "nestedBranch", "branchBin", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "fsmCoverage") {
+      static const char* const seq[] = {"fsm", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "fsm") {
+      static const char* const seq[] = {"state", "stateTransition", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "state") {
+      static const char* const seq[] = {"stateBin", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "stateTransition") {
+      static const char* const seq[] = {"state", "transitionBin", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "assertionCoverage") {
+      static const char* const seq[] = {"assertion", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "assertion") {
+      static const char* const seq[] = {
+        "coverBin", "passBin", "failBin", "vacuousBin",
+        "disabledBin", "attemptBin", "activeBin", "peakActiveBin", "userAttr"
+      };
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "covergroupCoverage") {
+      static const char* const seq[] = {"cgInstance", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "cgInstance") {
+      static const char* const seq[] = {"options", "cgId", "cgParms", "coverpoint", "cross", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "cgId") {
+      static const char* const seq[] = {"cginstSourceId", "cgSourceId"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "coverpoint") {
+      static const char* const seq[] = {"options", "coverpointBin", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "coverpointBin") {
+      static const char* const seq[] = {"range", "sequence", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "cross") {
+      static const char* const seq[] = {"options", "crossExpr", "crossBin", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "crossBin") {
+      static const char* const seq[] = {"index", "contents", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "range") {
+      static const char* const seq[] = {"contents"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "sequence") {
+      static const char* const seq[] = {"contents", "seqValue"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "bin" || parent.name == "coverBin" || parent.name == "passBin" ||
+        parent.name == "failBin" || parent.name == "vacuousBin" || parent.name == "disabledBin" ||
+        parent.name == "attemptBin" || parent.name == "activeBin" || parent.name == "peakActiveBin" ||
+        parent.name == "blockBin" || parent.name == "branchBin" || parent.name == "stateBin" ||
+        parent.name == "transitionBin") {
+      static const char* const seq[] = {"contents", "userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "contents") {
+      static const char* const seq[] = {"historyNodeId"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "designParameter" || parent.name == "cgParms") {
+      static const char* const seq[] = {"name", "value"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    if (parent.name == "metricMode") {
+      static const char* const seq[] = {"userAttr"};
+      return rank_in(seq, sizeof(seq) / sizeof(seq[0]), name);
+    }
+    static const char* const fallback[] = {
+      "sourceFiles", "historyNodes", "instanceCoverages", "designParameter", "id",
+      "toggleCoverage", "blockCoverage", "conditionCoverage", "branchCoverage",
+      "fsmCoverage", "assertionCoverage", "covergroupCoverage",
+      "cgInstance", "options", "cgId", "cgParms", "coverpoint",
+      "cross", "crossExpr", "crossBin", "coverpointBin", "range", "sequence", "index",
+      "contents", "seqValue"
+    };
+    return rank_in(fallback, sizeof(fallback) / sizeof(fallback[0]), name);
   };
+
   const size_t child_rank = rank(child->name);
   size_t at = parent.children.size();
   while (at > 0 && rank(parent.children[at - 1]->name) > child_rank) at--;
@@ -797,11 +948,13 @@ public:
           return t + "\n" + n.get("name");
         };
         merge_children_counts(*match, *copy, "crossBin", cross_bin_key);
+        merge_user_attrs(*match, *copy);
         continue;
       }
       crosses.add(name_key(*crs), copy.get());
       insert_child(into, std::move(copy));
     }
+    merge_user_attrs(into, from);
   }
 
 private:
@@ -857,12 +1010,58 @@ private:
   /*! Gives the file ids of an element of from, and of its children, their values in into */
   void map_file_ids(xml_node& node)
   {
-    if (node.name == "id" || node.name == "cginstSourceId" || node.name == "cgSourceId") {
+    if (node.name == "id" || node.name == "cginstSourceId" || node.name == "cgSourceId" ||
+        node.name == "statementId" || node.name == "blockId") {
       auto it = file_ids.find(node.get("file"));
       if (it != file_ids.end()) node.set("file", it->second);
     }
     for (auto &child : node.children)
       map_file_ids(*child);
+  }
+
+  std::unique_ptr<xml_node> clone_mapped(const xml_node& node)
+  {
+    std::unique_ptr<xml_node> copy = node.clone();
+    map_file_ids(*copy);
+    return copy;
+  }
+
+  static std::string trim_text(const std::string& s)
+  {
+    const size_t first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return std::string();
+    const size_t last = s.find_last_not_of(" \t\r\n");
+    return s.substr(first, last - first + 1);
+  }
+
+  std::string mapped_stmt_id(const xml_node& node, const std::string& elem_name = "id") const
+  {
+    const xml_node* id = node.element(elem_name);
+    if (id == nullptr) return std::string();
+    std::string f = id->get("file");
+    auto it = file_ids.find(f);
+    if (it != file_ids.end()) f = it->second;
+    return f + ":" + id->get("line") + ":" + id->get("inlineCount");
+  }
+
+  static std::string into_stmt_id(const xml_node& node, const std::string& elem_name = "id")
+  {
+    const xml_node* id = node.element(elem_name);
+    if (id == nullptr) return std::string();
+    return id->get("file") + ":" + id->get("line") + ":" + id->get("inlineCount");
+  }
+
+  static void merge_user_attrs(xml_node& into, const xml_node& from)
+  {
+    auto attr_key = [](const xml_node& n) { return n.get("key") + "\n" + n.text; };
+    keyed_children attrs(into, "userAttr", attr_key);
+    for (auto attr : from.elements("userAttr")) {
+      if (attrs.match(attr_key(*attr)) == nullptr) {
+        std::unique_ptr<xml_node> copy = attr->clone();
+        attrs.add(attr_key(*attr), copy.get());
+        insert_child(into, std::move(copy));
+      }
+    }
   }
 
   void merge_instances(xml_node& into, const xml_node& from)
@@ -919,25 +1118,502 @@ private:
 
   void merge_instance(xml_node& into, const xml_node& from)
   {
+    // designParameter
+    {
+      auto param_key = [](const xml_node& n) {
+        const xml_node* nm = n.element("name");
+        return nm ? trim_text(nm->text) : std::string();
+      };
+      keyed_children params(into, "designParameter", param_key);
+      for (auto p : from.elements("designParameter")) {
+        const std::string k = param_key(*p);
+        if (params.match(k) == nullptr) {
+          std::unique_ptr<xml_node> copy = clone_mapped(*p);
+          params.add(k, copy.get());
+          insert_child(into, std::move(copy));
+        }
+      }
+    }
+
+    // toggleCoverage
+    {
+      auto tc_key = [](const xml_node& n) { return n.get("metricMode"); };
+      keyed_children togs(into, "toggleCoverage", tc_key);
+      for (auto tc : from.elements("toggleCoverage")) {
+        xml_node* match = togs.match(tc_key(*tc));
+        if (match != nullptr) {
+          merge_toggle_coverage(*match, *tc);
+          continue;
+        }
+        std::unique_ptr<xml_node> copy = clone_mapped(*tc);
+        togs.add(tc_key(*tc), copy.get());
+        insert_child(into, std::move(copy));
+      }
+    }
+
+    // blockCoverage
+    {
+      auto bc_key = [](const xml_node& n) {
+        std::string kind;
+        if (!n.elements("process").empty()) kind = "process";
+        else if (!n.elements("block").empty()) kind = "block";
+        else if (!n.elements("statement").empty()) kind = "statement";
+        return kind + "\n" + n.get("metricMode");
+      };
+      keyed_children blks(into, "blockCoverage", bc_key);
+      for (auto bc : from.elements("blockCoverage")) {
+        xml_node* match = blks.match(bc_key(*bc));
+        if (match != nullptr) {
+          merge_block_coverage(*match, *bc);
+          continue;
+        }
+        std::unique_ptr<xml_node> copy = clone_mapped(*bc);
+        blks.add(bc_key(*bc), copy.get());
+        insert_child(into, std::move(copy));
+      }
+    }
+
+    // conditionCoverage
+    {
+      auto cc_key = [](const xml_node& n) { return n.get("metricMode"); };
+      keyed_children conds(into, "conditionCoverage", cc_key);
+      for (auto cc : from.elements("conditionCoverage")) {
+        xml_node* match = conds.match(cc_key(*cc));
+        if (match != nullptr) {
+          merge_condition_coverage(*match, *cc);
+          continue;
+        }
+        std::unique_ptr<xml_node> copy = clone_mapped(*cc);
+        conds.add(cc_key(*cc), copy.get());
+        insert_child(into, std::move(copy));
+      }
+    }
+
+    // branchCoverage
+    {
+      auto br_key = [](const xml_node& n) { return n.get("metricMode"); };
+      keyed_children brs(into, "branchCoverage", br_key);
+      for (auto bc : from.elements("branchCoverage")) {
+        xml_node* match = brs.match(br_key(*bc));
+        if (match != nullptr) {
+          merge_branch_coverage(*match, *bc);
+          continue;
+        }
+        std::unique_ptr<xml_node> copy = clone_mapped(*bc);
+        brs.add(br_key(*bc), copy.get());
+        insert_child(into, std::move(copy));
+      }
+    }
+
+    // fsmCoverage
+    {
+      auto fsm_key = [](const xml_node& n) { return n.get("metricMode"); };
+      keyed_children fsms(into, "fsmCoverage", fsm_key);
+      for (auto fc : from.elements("fsmCoverage")) {
+        xml_node* match = fsms.match(fsm_key(*fc));
+        if (match != nullptr) {
+          merge_fsm_coverage(*match, *fc);
+          continue;
+        }
+        std::unique_ptr<xml_node> copy = clone_mapped(*fc);
+        fsms.add(fsm_key(*fc), copy.get());
+        insert_child(into, std::move(copy));
+      }
+    }
+
+    // assertionCoverage
+    {
+      auto ac_key = [](const xml_node& n) { return n.get("metricMode"); };
+      keyed_children asrts(into, "assertionCoverage", ac_key);
+      for (auto ac : from.elements("assertionCoverage")) {
+        xml_node* match = asrts.match(ac_key(*ac));
+        if (match != nullptr) {
+          merge_assertion_coverage(*match, *ac);
+          continue;
+        }
+        std::unique_ptr<xml_node> copy = clone_mapped(*ac);
+        asrts.add(ac_key(*ac), copy.get());
+        insert_child(into, std::move(copy));
+      }
+    }
+
+    // covergroupCoverage
     keyed_children groups(into, "covergroupCoverage", cg_name);
     for (auto group : from.elements("covergroupCoverage"))
     {
       xml_node* match = groups.match(cg_name(*group));
       if (match != nullptr) {
         merge_covergroup(*match, *group);
+        merge_user_attrs(*match, *group);
         continue;
       }
-      std::unique_ptr<xml_node> copy = group->clone();
-      map_file_ids(*copy);
+      std::unique_ptr<xml_node> copy = clone_mapped(*group);
       groups.add(cg_name(*group), copy.get());
       insert_child(into, std::move(copy));
     }
+
     // the covergroups which were disabled, by their type name
-    auto attr_key = [](const xml_node& n) { return n.get("key") + "\n" + n.text; };
-    keyed_children attrs(into, "userAttr", attr_key);
-    for (auto attr : from.elements("userAttr"))
-      if (attrs.match(attr_key(*attr)) == nullptr)
-        insert_child(into, attr->clone());
+    merge_user_attrs(into, from);
+  }
+
+  void merge_toggle_coverage(xml_node& into, const xml_node& from)
+  {
+    auto obj_key = [](const xml_node& n) {
+      return n.get("name") + "\n" + n.get("type") + "\n" + n.get("portDirection");
+    };
+    keyed_children objs(into, "toggleObject", obj_key);
+    for (auto obj : from.elements("toggleObject")) {
+      xml_node* match = objs.match(obj_key(*obj));
+      if (match != nullptr) {
+        merge_toggle_object(*match, *obj);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = clone_mapped(*obj);
+      objs.add(obj_key(*obj), copy.get());
+      insert_child(into, std::move(copy));
+    }
+
+    auto mm_key = [](const xml_node& n) { return n.get("metricMode"); };
+    keyed_children mms(into, "metricMode", mm_key);
+    for (auto mm : from.elements("metricMode")) {
+      xml_node* match = mms.match(mm_key(*mm));
+      if (match != nullptr) {
+        merge_user_attrs(*match, *mm);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = mm->clone();
+      mms.add(mm_key(*mm), copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_user_attrs(into, from);
+  }
+
+  static void merge_toggle_object(xml_node& into, const xml_node& from)
+  {
+    auto bit_key = [](const xml_node& n) {
+      std::string k = n.get("name");
+      for (auto idx : n.elements("index")) k += "\n" + trim_text(idx->text);
+      return k;
+    };
+    keyed_children bits(into, "toggleBit", bit_key);
+    for (auto b : from.elements("toggleBit")) {
+      xml_node* match = bits.match(bit_key(*b));
+      if (match != nullptr) {
+        merge_toggle_bit(*match, *b);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = b->clone();
+      bits.add(bit_key(*b), copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_user_attrs(into, from);
+  }
+
+  static void merge_toggle_bit(xml_node& into, const xml_node& from)
+  {
+    auto tog_key = [](const xml_node& n) { return n.get("from") + "\n" + n.get("to"); };
+    keyed_children togs(into, "toggle", tog_key);
+    for (auto t : from.elements("toggle")) {
+      xml_node* match = togs.match(tog_key(*t));
+      if (match != nullptr) {
+        xml_node* into_bin = match->element("bin");
+        const xml_node* from_bin = t->element("bin");
+        if (into_bin != nullptr && from_bin != nullptr) {
+          add_counts(*into_bin, *from_bin);
+          merge_user_attrs(*into_bin, *from_bin);
+        }
+        continue;
+      }
+      const xml_node* from_bin = t->element("bin");
+      if (from_bin != nullptr) (void)coverage_count(*from_bin);
+      std::unique_ptr<xml_node> copy = t->clone();
+      togs.add(tog_key(*t), copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_user_attrs(into, from);
+  }
+
+  void merge_block_coverage(xml_node& into, const xml_node& from)
+  {
+    auto proc_key = [](const xml_node& n) {
+      return n.get("processType") + "\n" + n.get("alias");
+    };
+    keyed_children procs(into, "process", proc_key);
+    for (auto p : from.elements("process")) {
+      xml_node* match = procs.match(proc_key(*p));
+      if (match != nullptr) {
+        merge_block_list(*match, *p, "block");
+        merge_user_attrs(*match, *p);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = clone_mapped(*p);
+      procs.add(proc_key(*p), copy.get());
+      insert_child(into, std::move(copy));
+    }
+
+    merge_block_list(into, from, "block");
+
+    keyed_children stmts(into, "statement", [](const xml_node& n) { return into_stmt_id(n, "id"); });
+    for (auto s : from.elements("statement")) {
+      const std::string k = mapped_stmt_id(*s, "id");
+      xml_node* match = stmts.match(k);
+      if (match != nullptr) {
+        xml_node* into_bin = match->element("bin");
+        const xml_node* from_bin = s->element("bin");
+        if (into_bin != nullptr && from_bin != nullptr) {
+          add_counts(*into_bin, *from_bin);
+          merge_user_attrs(*into_bin, *from_bin);
+        }
+        merge_user_attrs(*match, *s);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = clone_mapped(*s);
+      stmts.add(k, copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_user_attrs(into, from);
+  }
+
+  void merge_block_list(xml_node& into, const xml_node& from, const std::string& elem_name)
+  {
+    keyed_children blocks(into, elem_name, [](const xml_node& n) {
+      return n.get("parentProcess") + "\n" + into_stmt_id(n, "blockId");
+    });
+    for (auto b : from.elements(elem_name)) {
+      const std::string k = b->get("parentProcess") + "\n" + mapped_stmt_id(*b, "blockId");
+      xml_node* match = blocks.match(k);
+      if (match != nullptr) {
+        merge_block(*match, *b);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = clone_mapped(*b);
+      blocks.add(k, copy.get());
+      insert_child(into, std::move(copy));
+    }
+  }
+
+  void merge_block(xml_node& into, const xml_node& from)
+  {
+    keyed_children sids(into, "statementId", [](const xml_node& n) {
+      return n.get("file") + ":" + n.get("line") + ":" + n.get("inlineCount");
+    });
+    for (auto sid : from.elements("statementId")) {
+      std::unique_ptr<xml_node> mapped = clone_mapped(*sid);
+      const std::string k = mapped->get("file") + ":" + mapped->get("line") + ":" + mapped->get("inlineCount");
+      if (sids.match(k) == nullptr) {
+        sids.add(k, mapped.get());
+        insert_child(into, std::move(mapped));
+      }
+    }
+    merge_block_list(into, from, "hierarchicalBlock");
+    xml_node* into_bin = into.element("blockBin");
+    const xml_node* from_bin = from.element("blockBin");
+    if (into_bin != nullptr && from_bin != nullptr) {
+      add_counts(*into_bin, *from_bin);
+      merge_user_attrs(*into_bin, *from_bin);
+    }
+    merge_user_attrs(into, from);
+  }
+
+  void merge_condition_coverage(xml_node& into, const xml_node& from)
+  {
+    merge_expr_list(into, from, "expr");
+    merge_user_attrs(into, from);
+  }
+
+  void merge_expr_list(xml_node& into, const xml_node& from, const std::string& elem_name)
+  {
+    auto expr_key = [](const xml_node& n) {
+      return n.get("name") + "\n" + n.get("exprString") + "\n" + n.get("index");
+    };
+    keyed_children exprs(into, elem_name, expr_key);
+    for (auto e : from.elements(elem_name)) {
+      xml_node* match = exprs.match(expr_key(*e));
+      if (match != nullptr) {
+        merge_expr(*match, *e);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = clone_mapped(*e);
+      exprs.add(expr_key(*e), copy.get());
+      insert_child(into, std::move(copy));
+    }
+  }
+
+  void merge_expr(xml_node& into, const xml_node& from)
+  {
+    keyed_children bins(into, "bin", [](const xml_node& n) { return n.get("alias"); });
+    for (auto b : from.elements("bin")) {
+      xml_node* match = bins.match(b->get("alias"));
+      if (match != nullptr) {
+        add_counts(*match, *b);
+        merge_user_attrs(*match, *b);
+        continue;
+      }
+      (void)coverage_count(*b);
+      std::unique_ptr<xml_node> copy = b->clone();
+      bins.add(b->get("alias"), copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_expr_list(into, from, "hierarchicalExpr");
+    merge_user_attrs(into, from);
+  }
+
+  void merge_branch_coverage(xml_node& into, const xml_node& from)
+  {
+    merge_branch_stmts(into, from, "statement");
+    merge_user_attrs(into, from);
+  }
+
+  void merge_branch_stmts(xml_node& into, const xml_node& from, const std::string& elem_name)
+  {
+    keyed_children stmts(into, elem_name, [](const xml_node& n) {
+      return n.get("statementType") + "\n" + n.get("branchExpr") + "\n" + into_stmt_id(n, "id");
+    });
+    for (auto s : from.elements(elem_name)) {
+      const std::string k = s->get("statementType") + "\n" + s->get("branchExpr") + "\n" + mapped_stmt_id(*s, "id");
+      xml_node* match = stmts.match(k);
+      if (match != nullptr) {
+        merge_branch_stmt(*match, *s);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = clone_mapped(*s);
+      stmts.add(k, copy.get());
+      insert_child(into, std::move(copy));
+    }
+  }
+
+  void merge_branch_stmt(xml_node& into, const xml_node& from)
+  {
+    keyed_children branches(into, "branch", [](const xml_node& n) { return into_stmt_id(n, "id"); });
+    for (auto b : from.elements("branch")) {
+      const std::string k = mapped_stmt_id(*b, "id");
+      xml_node* match = branches.match(k);
+      if (match != nullptr) {
+        merge_branch_stmts(*match, *b, "nestedBranch");
+        xml_node* into_bin = match->element("branchBin");
+        const xml_node* from_bin = b->element("branchBin");
+        if (into_bin != nullptr && from_bin != nullptr) {
+          add_counts(*into_bin, *from_bin);
+          merge_user_attrs(*into_bin, *from_bin);
+        }
+        merge_user_attrs(*match, *b);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = clone_mapped(*b);
+      branches.add(k, copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_user_attrs(into, from);
+  }
+
+  static void merge_fsm_coverage(xml_node& into, const xml_node& from)
+  {
+    auto fsm_key = [](const xml_node& n) { return n.get("name") + "\n" + n.get("type"); };
+    keyed_children fsms(into, "fsm", fsm_key);
+    for (auto f : from.elements("fsm")) {
+      xml_node* match = fsms.match(fsm_key(*f));
+      if (match != nullptr) {
+        auto state_key = [](const xml_node& n) { return n.get("stateName") + "\n" + n.get("stateValue"); };
+        keyed_children states(*match, "state", state_key);
+        for (auto st : f->elements("state")) {
+          xml_node* sm = states.match(state_key(*st));
+          if (sm != nullptr) {
+            xml_node* ib = sm->element("stateBin");
+            const xml_node* fb = st->element("stateBin");
+            if (ib != nullptr && fb != nullptr) {
+              add_counts(*ib, *fb);
+              merge_user_attrs(*ib, *fb);
+            }
+            merge_user_attrs(*sm, *st);
+            continue;
+          }
+          std::unique_ptr<xml_node> copy = st->clone();
+          states.add(state_key(*st), copy.get());
+          insert_child(*match, std::move(copy));
+        }
+        auto trans_key = [](const xml_node& n) {
+          std::string k;
+          for (auto s : n.elements("state")) k += trim_text(s->text) + "\n";
+          return k;
+        };
+        keyed_children transs(*match, "stateTransition", trans_key);
+        for (auto tr : f->elements("stateTransition")) {
+          xml_node* tm = transs.match(trans_key(*tr));
+          if (tm != nullptr) {
+            xml_node* ib = tm->element("transitionBin");
+            const xml_node* fb = tr->element("transitionBin");
+            if (ib != nullptr && fb != nullptr) {
+              add_counts(*ib, *fb);
+              merge_user_attrs(*ib, *fb);
+            }
+            merge_user_attrs(*tm, *tr);
+            continue;
+          }
+          std::unique_ptr<xml_node> copy = tr->clone();
+          transs.add(trans_key(*tr), copy.get());
+          insert_child(*match, std::move(copy));
+        }
+        merge_user_attrs(*match, *f);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = f->clone();
+      fsms.add(fsm_key(*f), copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_user_attrs(into, from);
+  }
+
+  static void merge_assertion_coverage(xml_node& into, const xml_node& from)
+  {
+    auto asrt_key = [](const xml_node& n) {
+      return n.get("assertionKind") + "\n" + n.get("name") + "\n" +
+             n.get("nameComponent") + "\n" + n.get("typeComponent");
+    };
+    keyed_children asrts(into, "assertion", asrt_key);
+    for (auto a : from.elements("assertion")) {
+      xml_node* match = asrts.match(asrt_key(*a));
+      if (match != nullptr) {
+        static const char* const sum_bins[] = {
+          "coverBin", "passBin", "failBin", "vacuousBin",
+          "disabledBin", "attemptBin", "activeBin"
+        };
+        for (size_t i = 0; i < sizeof(sum_bins) / sizeof(sum_bins[0]); ++i) {
+          const std::string bname = sum_bins[i];
+          const xml_node* fb = a->element(bname);
+          if (fb == nullptr) continue;
+          xml_node* ib = match->element(bname);
+          if (ib != nullptr) {
+            add_counts(*ib, *fb);
+            merge_user_attrs(*ib, *fb);
+          } else {
+            (void)coverage_count(*fb);
+            insert_child(*match, fb->clone());
+          }
+        }
+        const xml_node* fpeak = a->element("peakActiveBin");
+        if (fpeak != nullptr) {
+          xml_node* ipeak = match->element("peakActiveBin");
+          if (ipeak != nullptr) {
+            const uint64_t va = coverage_count(*ipeak);
+            const uint64_t vb = coverage_count(*fpeak);
+            xml_node* contents = ipeak->element("contents");
+            if (contents != nullptr) {
+              contents->set("coverageCount", std::to_string(std::max(va, vb)));
+            }
+            merge_user_attrs(*ipeak, *fpeak);
+          } else {
+            (void)coverage_count(*fpeak);
+            insert_child(*match, fpeak->clone());
+          }
+        }
+        merge_user_attrs(*match, *a);
+        continue;
+      }
+      std::unique_ptr<xml_node> copy = a->clone();
+      asrts.add(asrt_key(*a), copy.get());
+      insert_child(into, std::move(copy));
+    }
+    merge_user_attrs(into, from);
   }
 
   void merge_covergroup(xml_node& into, const xml_node& from)
@@ -1074,7 +1750,9 @@ private:
         return t + "\n" + n.get("name");
       };
       merge_children_counts(a, b, "crossBin", cross_bin_key);
+      merge_user_attrs(a, b);
     });
+    merge_user_attrs(into, from);
   }
 
   template <typename K>
@@ -1096,6 +1774,7 @@ private:
       xml_node* match = children.match(key(*child));
       if (match != nullptr) {
         add_counts(*match, *child);
+        merge_user_attrs(*match, *child);
         continue;
       }
       coverage_count(*child);
@@ -1162,7 +1841,9 @@ private:
       merge_children_counts(a, b, "sequence", sequence_key, [&](const xml_node& n) {
         warn("sequence " + sequence_key(n));
       });
+      merge_user_attrs(a, b);
     });
+    merge_user_attrs(into, from);
 
     if (into.elements("coverpointBin").size() > 1) {
       into.children.erase(

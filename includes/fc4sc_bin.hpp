@@ -504,27 +504,27 @@ public:
 
   // the type of bin (default/ignore/illegal)
   //bin_t bin_type;
-  bin_t& get_bin_type()
+  bin_t& get_bin_type() override
   {
     return bin_type;
   }
 
   /*! Storage for hit counts corresponding to intervals */
   //std::vector<uint64_t> interval_hits;
-  std::vector<uint64_t>& get_interval_hits()
+  std::vector<uint64_t>& get_interval_hits() override
   {
     return interval_hits;
   }
 
   /*! Name of the bin */
   //std::string name;
-  std::string& get_name()
+  std::string& get_name() override
   {
     return name;
   }
 
   /* function to introspect the bin's intervals */
-  std::vector<interval_t<int>> get_intervals_to_int() const
+  std::vector<interval_t<int>> get_intervals_to_int() const override
   {
     std::vector<interval_t<int>> intervals_int;
     for(auto inter_it : intervals)
@@ -536,7 +536,7 @@ public:
   }
 
   /* function to introspect the bin's intervals, the values in full */
-  std::vector<interval_t<std::string>> get_intervals_decimal() const
+  std::vector<interval_t<std::string>> get_intervals_decimal() const override
   {
     std::vector<interval_t<std::string>> intervals_dec;
     for (auto &intv : intervals)
@@ -553,7 +553,7 @@ public:
     return attrs;
   }
 
-  void accept_visitor(covVisitorBase& visitor)
+  void accept_visitor(covVisitorBase& visitor) override
   {
     visitor.visit(*this);
   }
@@ -641,7 +641,7 @@ protected:
 
   // the type of bin (default/ignore/illegal)
   //bin_t bin_type;
-  bin_t& bin_type()
+  bin_t& bin_type() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -652,7 +652,7 @@ protected:
 
   /*! Storage for hit counts corresponding to intervals */
   //std::vector<uint64_t> interval_hits;
-  std::vector<uint64_t>& interval_hits()
+  std::vector<uint64_t>& interval_hits() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -674,7 +674,7 @@ protected:
 
   /*! Name of the bin */
   //std::string name;
-  std::string& name()
+  std::string& name() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -753,7 +753,7 @@ protected:
 public:
 
   /* function to introspect the bin's intervals */
-  std::vector<interval_t<int>> get_intervals_to_int() const
+  std::vector<interval_t<int>> get_intervals_to_int() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -769,7 +769,7 @@ public:
   }
 
   /* function to introspect the bin's intervals, the values in full */
-  std::vector<interval_t<std::string>> get_intervals_decimal() const
+  std::vector<interval_t<std::string>> get_intervals_decimal() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -843,7 +843,7 @@ public:
     return *this;
   }
 
-  uint64_t get_hitcount() const
+  uint64_t get_hitcount() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -2147,7 +2147,7 @@ public:
    * shortest sequence of each transition with goto or nonconsecutive
    * repetitions
    */
-  std::vector<std::vector<int>> get_sequences_to_int() const
+  std::vector<std::vector<int>> get_sequences_to_int() const override
   {
     std::vector<std::vector<int>> sequences_int;
     for (auto &seq : sequences)
@@ -2166,7 +2166,7 @@ public:
   }
 
   /* the sequences of get_sequences_to_int(), the values in full */
-  std::vector<std::vector<std::string>> get_sequences_decimal() const
+  std::vector<std::vector<std::string>> get_sequences_decimal() const override
   {
     std::vector<std::vector<std::string>> sequences_dec;
     for (auto &seq : sequences)

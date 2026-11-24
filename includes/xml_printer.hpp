@@ -244,12 +244,97 @@ public:
     stream << ">\n";
 
     stream << "<id ";
-    stream << "file=\"" << base.type_data->file_id << "\" ";
-    stream << "line=\"" << base.type_data->line << "\" ";
+    stream << "file=\"" << (base.type_data->file_id > 0 ? base.type_data->file_id : 1U) << "\" ";
+    stream << "line=\"" << (base.type_data->line > 0 ? base.type_data->line : 1U) << "\" ";
     stream << "inlineCount=\""
            << "1"
            << "\" ";
     stream << "/>\n";
+
+    // Optional toggleCoverage (UCIS.xsd sequence: after <id>, before <assertionCoverage> and <covergroupCoverage>)
+    if (!base.toggle_cov.objects.empty()) {
+      stream << "<toggleCoverage ";
+      if (!base.toggle_cov.metric_mode.empty()) {
+        stream << "metricMode=\"" << escape_xml_chars(base.toggle_cov.metric_mode) << "\" ";
+      }
+      stream << "weight=\"" << base.toggle_cov.weight << "\">\n";
+      for (const auto& obj : base.toggle_cov.objects) {
+        if (!obj || obj->bits.empty()) continue;
+        stream << "<toggleObject name=\"" << escape_xml_chars(obj->name) << "\" "
+               << "key=\"" << get_unique_key() << "\" ";
+        if (!obj->type_name.empty()) {
+          stream << "type=\"" << escape_xml_chars(obj->type_name) << "\" ";
+        }
+        if (!obj->port_direction.empty()) {
+          stream << "portDirection=\"" << escape_xml_chars(obj->port_direction) << "\" ";
+        }
+        stream << "excluded=\"" << (obj->excluded ? "true" : "false") << "\">\n";
+        if (obj->is_vector && obj->bit_width > 0) {
+          stream << "<dimension left=\"" << (obj->bit_width - 1) << "\" right=\"0\" downto=\"true\"/>\n";
+        }
+        stream << "<id file=\"" << (obj->file_id > 0 ? obj->file_id : 1U)
+               << "\" line=\"" << (obj->line > 0 ? obj->line : 1U)
+               << "\" inlineCount=\"1\"/>\n";
+        for (const auto& bit : obj->bits) {
+          if (bit.toggles.empty()) continue;
+          stream << "<toggleBit name=\"" << escape_xml_chars(bit.name) << "\" "
+                 << "key=\"" << get_unique_key() << "\" "
+                 << "excluded=\"" << (bit.excluded ? "true" : "false") << "\">\n";
+          if (bit.has_index) {
+            stream << "<index>" << bit.index << "</index>\n";
+          }
+          for (const auto& tog : bit.toggles) {
+            stream << "<toggle from=\"" << escape_xml_chars(tog.from) << "\" "
+                   << "to=\"" << escape_xml_chars(tog.to) << "\">\n"
+                   << "<bin coverageCountGoal=\"" << tog.goal << "\" "
+                   << "excluded=\"" << (tog.excluded ? "true" : "false") << "\">"
+                   << "<contents coverageCount=\"" << tog.count << "\"/>"
+                   << "</bin>\n"
+                   << "</toggle>\n";
+          }
+          stream << "</toggleBit>\n";
+        }
+        stream << "</toggleObject>\n";
+      }
+      stream << "</toggleCoverage>\n";
+    }
+
+    // Optional assertionCoverage (UCIS.xsd sequence: after <toggleCoverage>, before <covergroupCoverage>)
+    if (!base.assertion_cov.assertions.empty()) {
+      stream << "<assertionCoverage weight=\"" << base.assertion_cov.weight << "\">\n";
+      for (const auto& asrt : base.assertion_cov.assertions) {
+        if (!asrt) continue;
+        stream << "<assertion name=\"" << escape_xml_chars(asrt->name) << "\" "
+               << "assertionKind=\"" << escape_xml_chars(asrt->assertion_kind.empty() ? std::string("assert") : asrt->assertion_kind) << "\" ";
+        if (!asrt->name_component.empty()) {
+          stream << "nameComponent=\"" << escape_xml_chars(asrt->name_component) << "\" ";
+        }
+        if (!asrt->type_component.empty()) {
+          stream << "typeComponent=\"" << escape_xml_chars(asrt->type_component) << "\" ";
+        }
+        stream << "excluded=\"" << (asrt->excluded ? "true" : "false") << "\" "
+               << "weight=\"" << asrt->weight << "\">\n";
+        auto emit_bin = [&](const char* tag, bool emit, uint64_t cnt) {
+          if (emit) {
+            stream << "<" << tag << "><contents coverageCount=\"" << cnt << "\"/></" << tag << ">\n";
+          }
+        };
+        emit_bin("coverBin", asrt->emit_cover_bin, asrt->cover_count);
+        emit_bin("passBin", asrt->emit_pass_bin, asrt->pass_count);
+        emit_bin("failBin", asrt->emit_fail_bin, asrt->fail_count);
+        emit_bin("vacuousBin", asrt->emit_vacuous_bin, asrt->vacuous_count);
+        emit_bin("disabledBin", asrt->emit_disabled_bin, asrt->disabled_count);
+        emit_bin("attemptBin", asrt->emit_attempt_bin, asrt->attempt_count);
+        emit_bin("activeBin", asrt->emit_active_bin, asrt->active_count);
+        emit_bin("peakActiveBin", asrt->emit_peak_active_bin, asrt->peak_active_count);
+        if (!asrt->expr_str.empty()) {
+          stream << "<userAttr key=\"fc4sc.expr\" type=\"str\" len=\"" << asrt->expr_str.size() << "\">"
+                 << escape_xml_chars(asrt->expr_str) << "</userAttr>\n";
+        }
+        stream << "</assertion>\n";
+      }
+      stream << "</assertionCoverage>\n";
+    }
 
     // Each type is between an instanceCoverages tag
     for (auto &type_it : base.cvgs)
@@ -282,24 +367,57 @@ public:
           if (cvg->enable && has_coverpoints(*cvg) && std::find(type_insts.begin(), type_insts.end(), cvg) == type_insts.end())
             write_cg_instance(*cvg);
 
+        const unsigned int tgoal = type_it.second.front()->type_data->type_option.goal;
+        if (tgoal != 100) {
+          const std::string gstr = std::to_string(tgoal);
+          stream << "<userAttr key=\"fc4sc.type_goal\" type=\"int\" len=\"" << gstr.size() << "\">"
+                 << gstr << "</userAttr>\n";
+        }
+
         stream << "</covergroupCoverage>\n";
       }
     }
 
+    auto pct_encode_attr_field = [](const std::string& s) {
+      std::string out;
+      out.reserve(s.size());
+      static const char hex[] = "0123456789ABCDEF";
+      for (size_t k = 0; k < s.size(); ++k) {
+        const unsigned char c = static_cast<unsigned char>(s[k]);
+        if (c == '%' || c == '|' || c == '\n' || c == '\r') {
+          out.push_back('%');
+          out.push_back(hex[(c >> 4) & 0xF]);
+          out.push_back(hex[c & 0xF]);
+        } else {
+          out.push_back(static_cast<char>(c));
+        }
+      }
+      return out;
+    };
+
     for (auto &type_it : base.cvgs)
     {
-      // Print each instance
+      // Print each disabled instance unambiguously as an fc4sc.disabled_cg userAttr
       for (size_t i = 0; i < type_it.second.size(); ++i)
       {
         if(!type_it.second[i]->enable) {
+          const fc4sc::cvg_base_data_model* dcg = type_it.second[i];
+          const std::string payload = "v1|" +
+              pct_encode_attr_field(dcg->type_data->type_name) + "|" +
+              pct_encode_attr_field(dcg->type_data->scp_type_name) + "|" +
+              pct_encode_attr_field(dcg->name) + "|" +
+              std::to_string(dcg->type_data->type_option.weight) + "|" +
+              std::to_string(dcg->option.weight) + "|" +
+              std::to_string(dcg->type_data->type_option.goal) + "|" +
+              (dcg->type_data->type_option.merge_instances ? "1" : "0");
           stream << "<userAttr ";
-  	  stream << "key=\"" << escape_xml_chars(type_it.second[i]->type_data->type_name) << "\" \n";
-          stream << "type=\"str\"\n";
-	  stream << "len=\"" << type_it.second[i]->type_data->type_name.size() << "\"\n";
-	  stream << ">\n";
-	  stream << escape_xml_chars(type_it.second[i]->type_data->type_name);
-	  stream << "</userAttr>\n";
-	}
+          stream << "key=\"fc4sc.disabled_cg\" ";
+          stream << "type=\"str\" ";
+          stream << "len=\"" << payload.size() << "\"";
+          stream << ">";
+          stream << escape_xml_chars(payload);
+          stream << "</userAttr>\n";
+        }
       }
     }
 

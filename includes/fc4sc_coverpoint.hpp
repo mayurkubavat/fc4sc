@@ -86,23 +86,23 @@ public:
    */
   std::string sample_condition_str;
 
-  uint64_t size() const {
+  uint64_t size() const override {
     if (owner_ != nullptr && !in_ensure_bins_)
       owner_->ensure_bins();
     return bins_data.size();
   }
 
-  std::string& get_sample_expression_str()
+  std::string& get_sample_expression_str() override
   {
     return sample_expression_str;
   }
 
-  std::string& get_sample_condition_str()
+  std::string& get_sample_condition_str() override
   {
     return sample_condition_str;
   }
 
-  void accept_visitor(covVisitorBase& visitor)
+  void accept_visitor(covVisitorBase& visitor) override
   {
     sync_options_from_parent();
     if (owner_ != nullptr && !in_ensure_bins_)
@@ -289,7 +289,7 @@ private:
   /*!
    *  \brief Create a dynamic copy of this coverpoint with matching bin types
    */
-  cvp_base* create_instance(cvg_base* cvg_inst)
+  cvp_base* create_instance(cvg_base*) override
   {
     coverpoint<T>* cvp = new coverpoint<T>;
     cvp->cvp_data->name = this->name();
@@ -545,7 +545,7 @@ private:
   /*!
    *  \brief Helper for slicing the intervals of overlapping bins
    */
-  interval_map_iterator_t slice_intervals_map(interval_map_iterator_t hint_it, interval_map_t& interval_map, fc4sc::interval_t<T> range)
+  interval_map_iterator_t slice_intervals_map(interval_map_iterator_t, interval_map_t& interval_map, fc4sc::interval_t<T> range)
   {
     typedef fc4sc_type_traits<T> traits;
     T start_cut = range.first;
@@ -1046,7 +1046,7 @@ public:
     parent_cvg->get_cvg_data()->add_cvp_data(this->cvp_data);
   }
 
-  uint64_t bins_epoch() const {
+  uint64_t bins_epoch() const override {
     return bins_epoch_;
   }
 
@@ -1054,7 +1054,7 @@ public:
     return !has_explicit_bins_ || has_with_bin_array_;
   }
 
-  void ensure_bins() const {
+  void ensure_bins() const override {
     if (valid_data.use_count() == 0 || cvp_data == nullptr) return;
     if (cvp_data->in_ensure_bins_ || has_sampled_) return;
     coverpoint<T>* self = const_cast<coverpoint<T>*>(this);
@@ -1165,7 +1165,7 @@ public:
   /*!
    *  Retrieves the number of regular bins
    */
-  uint64_t size() const {
+  uint64_t size() const override {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
@@ -1176,7 +1176,7 @@ public:
     return bins.size();
   }
 
-  void sample() 
+  void sample() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1323,7 +1323,7 @@ public:
    *  get_inst_coverage option of the covergroup instance is set.
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_inst_coverage() const 
+  double get_inst_coverage() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1354,7 +1354,7 @@ public:
    *  \param total Total number of bins in this coverpoint
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_inst_coverage(int &covered, int &total) const 
+  double get_inst_coverage(int &covered, int &total) const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1389,7 +1389,7 @@ public:
    *  across all the instances of the covergroup type it is in
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_coverage() const
+  double get_coverage() const override
   {
     int covered = 0;
     int total = 0;
@@ -1402,7 +1402,7 @@ public:
    *  \param total Total number of bins, summed over the instances
    *  \returns Coverage value as a double between 0 and 100
    */
-  double get_coverage(int &covered, int &total) const
+  double get_coverage(int &covered, int &total) const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1441,7 +1441,7 @@ public:
   /*!
    * \brief Enables sampling
    */
-  void start()
+  void start() override
   {
     collect = true;
   }
@@ -1449,7 +1449,7 @@ public:
   /*!
    * \brief Enables sampling
    */
-  void stop()
+  void stop() override
   {
     collect = false;
   }
@@ -1525,7 +1525,7 @@ public:
  /*!
    * \brief Returns coverpoint bin misses
    */
-  uint64_t get_misses()
+  uint64_t get_misses() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1538,7 +1538,7 @@ public:
   /*!
    * \brief Returns coverpoint coverage weight
    */
-  uint64_t get_weight()
+  uint64_t get_weight() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -1786,7 +1786,7 @@ public:
     return names;
   }
 
-  std::string& get_sample_expression_str()
+  std::string& get_sample_expression_str() override
   {
     return cvp_data->sample_expression_str;
   }

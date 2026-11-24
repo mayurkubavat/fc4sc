@@ -514,8 +514,8 @@ class coverpoint_base_data_model;
 class cross_base_data_model;
 class bin_base_data_model;
 class global;
-class cvg_metadata;
-class scp_metadata;
+struct cvg_metadata;
+struct scp_metadata;
 
 struct uncovered_bin_info {
   std::string name;
@@ -582,7 +582,9 @@ typedef enum
  */
 class covVisitorBase {
 public:
- 
+
+  virtual ~covVisitorBase() {}
+
   /*! visit a scope's data model */
   virtual void visit(scp_base_data_model&) = 0;
 
@@ -1786,6 +1788,93 @@ public:
 };
 
 /*!
+ *  \brief Pure C++11 representation of a UCIS toggle transition (from -> to)
+ */
+struct toggle_transition_data {
+  std::string from;
+  std::string to;
+  uint64_t count = 0;
+  uint64_t goal = 1;
+  bool excluded = false;
+};
+
+/*!
+ *  \brief Pure C++11 representation of a single bit in a UCIS toggleObject
+ */
+struct toggle_bit_data {
+  std::string name;
+  unsigned int index = 0;
+  bool has_index = false;
+  bool excluded = false;
+  std::vector<toggle_transition_data> toggles;
+};
+
+/*!
+ *  \brief Pure C++11 representation of a UCIS toggleObject
+ */
+struct toggle_object_data {
+  std::string name;
+  std::string full_name;
+  std::string type_name;
+  std::string port_direction;
+  unsigned int file_id = 1;
+  uint32_t line = 1;
+  unsigned int bit_width = 1;
+  bool is_vector = false;
+  bool is_4state = false;
+  bool excluded = false;
+  std::vector<toggle_bit_data> bits;
+};
+
+/*!
+ *  \brief Pure C++11 container of UCIS toggleCoverage objects on a scope
+ */
+struct toggle_coverage_data {
+  std::string metric_mode = "2state";
+  unsigned int weight = 1;
+  std::vector<std::shared_ptr<toggle_object_data>> objects;
+};
+
+/*!
+ *  \brief Pure C++11 representation of a UCIS assertion item
+ */
+struct assertion_item_data {
+  std::string name;
+  std::string assertion_kind;
+  std::string name_component;
+  std::string type_component;
+  std::string expr_str;
+  unsigned int file_id = 1;
+  uint32_t line = 1;
+  uint64_t cover_count = 0;
+  uint64_t pass_count = 0;
+  uint64_t fail_count = 0;
+  uint64_t vacuous_count = 0;
+  uint64_t disabled_count = 0;
+  uint64_t attempt_count = 0;
+  uint64_t active_count = 0;
+  uint64_t peak_active_count = 0;
+  bool emit_cover_bin = false;
+  bool emit_pass_bin = false;
+  bool emit_fail_bin = false;
+  bool emit_vacuous_bin = false;
+  bool emit_disabled_bin = false;
+  bool emit_attempt_bin = false;
+  bool emit_active_bin = false;
+  bool emit_peak_active_bin = false;
+  bool excluded = false;
+  unsigned int weight = 1;
+};
+
+/*!
+ *  \brief Pure C++11 container of UCIS assertionCoverage items on a scope
+ */
+struct assertion_coverage_data {
+  unsigned int weight = 1;
+  std::vector<std::shared_ptr<assertion_item_data>> assertions;
+};
+
+/*!
  *  \class cvg_base_data_model fc_base.hpp
  *  \brief Base class for data of crosses
  *
@@ -1833,6 +1922,12 @@ public:
 
   /*! Map from type name to Vector of covergroup data pointer for covergroups instanced in this scope */
   std::unordered_map<std::string,std::vector<cvg_base_data_model*>> cvgs;
+
+  /*! Pure C++11 toggle coverage data attached to this scope */
+  toggle_coverage_data toggle_cov;
+
+  /*! Pure C++11 assertion coverage data attached to this scope */
+  assertion_coverage_data assertion_cov;
 
   /*! Add covergroup instance to this scope */
   virtual void add_cvg_data(cvg_base_data_model* cvg_data,std::string cvg_type_name, std::string scp_type_name, unsigned int cvg_file_id, uint32_t cvg_line) = 0;

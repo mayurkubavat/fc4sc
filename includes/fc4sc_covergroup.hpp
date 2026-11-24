@@ -190,7 +190,7 @@ protected:
     return 0;
   }
 
-  virtual cvp_metadata_t get_strings(cvp_base *cvp) {
+  virtual cvp_metadata_t get_strings(cvp_base *cvp) override {
     return cvp_strings[cvp];
   }
 
@@ -405,7 +405,7 @@ public:
     this->sample();
   }
 
-  virtual void disable_cvg() {
+  virtual void disable_cvg() override {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
       throw("Error: coverage data has been deleted");
@@ -441,7 +441,7 @@ public:
    * option.get_inst_coverage is set, as in SystemVerilog.
    * \returns Coverage percentage of this instance
    */
-  double get_inst_coverage()  const 
+  double get_inst_coverage() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -479,7 +479,7 @@ public:
    * \param total Total number of bins in this covergroup
    * \returns Coverage percentage of this instance
    */
-  double get_inst_coverage(int &bins_covered, int &total) const 
+  double get_inst_coverage(int &bins_covered, int &total) const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -667,7 +667,7 @@ public:
     cvg_data->name = inst_name;
   }
 
-  cvg_option& option() const
+  cvg_option& option() const override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -721,7 +721,7 @@ public:
     return cvg_data->type_data->scp_type_name;
   }
   
-  unsigned int& file_id()
+  unsigned int& file_id() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -730,7 +730,7 @@ public:
     return cvg_data->type_data->file_id;
   }
 
-  uint32_t& line()
+  uint32_t& line() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -739,7 +739,7 @@ public:
     return cvg_data->type_data->line;
   }
 
-  unsigned int& inst_file_id()
+  unsigned int& inst_file_id() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";
@@ -748,7 +748,7 @@ public:
     return cvg_data->inst_file_id;
   }
 
-  uint32_t& inst_line()
+  uint32_t& inst_line() override
   {
     if(valid_data.use_count() == 0) {
       std::cerr << "Error: coverage data has been deleted\n";

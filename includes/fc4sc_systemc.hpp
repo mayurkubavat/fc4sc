@@ -37,6 +37,8 @@
 #include <systemc>
 
 #include "fc4sc.hpp"
+#include "fc4sc_toggle.hpp"
+#include "fc4sc_sva.hpp"
 
 namespace fc4sc {
 
@@ -153,9 +155,18 @@ private:
     }
     auto* reg = (simc != nullptr) ? simc->get_stage_cb_registry() : nullptr;
     if (simc != nullptr && reg != nullptr) {
-      if (!flushing_ &&
-          (pending_.empty() || !registered_ || registered_simc_ != simc ||
-           registered_registry_ != reg)) {
+      const bool new_sim_cycle =
+          !registered_ ||
+          registered_simc_ != simc ||
+          registered_registry_ != reg ||
+          epoch_marker_.empty() ||
+          !simc->hierarchical_name_exists(nullptr, epoch_marker_.c_str());
+      if (!flushing_ && (pending_.empty() || new_sim_cycle)) {
+        if (new_sim_cycle) {
+          ++sim_epoch_;
+          epoch_marker_ = "__fc4sc_strobe_epoch_" + std::to_string(sim_epoch_);
+          simc->register_hierarchical_name(nullptr, epoch_marker_);
+        }
         sc_core::sc_register_stage_callback(*this, kStageMask);
         registered_ = true;
         registered_simc_ = simc;
@@ -166,6 +177,8 @@ private:
 
   bool registered_ = false;
   bool flushing_ = false;
+  uint64_t sim_epoch_ = 0;
+  std::string epoch_marker_;
   sc_core::sc_simcontext* registered_simc_ = nullptr;
   sc_core::sc_stage_callback_registry* registered_registry_ = nullptr;
   std::vector<covergroup*> pending_;
